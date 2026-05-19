@@ -2,20 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MSTR Rotation Tool Terminal</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MSTR Campaign Command Deck</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin></anonymous></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js" crossorigin="anonymous"></script>
+  <style>
+    body { margin: 0; padding: 0; background-color: #0a0806; -webkit-font-smoothing: antialiased; }
+    input, textarea, button { font-family: inherit; box-sizing: border-box; }
+  </style>
 </head>
-<body style="margin: 0; background-color: #0a0806;">
+<body>
 
   <div id="mstr-app-root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    // Secure global browser storage mock configuration
+    const nativeStorage = {
+      get: async (key) => ({ value: window.localStorage.getItem(key) }),
+      set: async (key, val) => window.localStorage.setItem(key, val)
+    };
 
-    // Fixed internal colors baseline dictionary to prevent rendering crashes
     const colors = {
       bg: '#0a0806', panel: '#14100c', border: '#2a2520',
       text: '#d4c8b8', textDim: '#a89580', textMute: '#8a7a65', textFaint: '#5a5048',
@@ -23,59 +30,55 @@
     };
     const serif = 'Georgia, "Times New Roman", serif';
 
-    // Standard local storage fallback structure for direct browser routing
-    window.storage = {
-      get: async (key) => ({ value: localStorage.getItem(key) }),
-      set: async (key, val) => localStorage.setItem(key, val)
+    const t = {
+      eyebrow: { fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase', color: colors.textMute },
+      meta:    { fontSize: '11px', color: colors.textDim },
+      body:    { fontSize: '13px', color: colors.text, lineHeight: '1.55' },
+      value:   { fontSize: '15px', color: colors.text, fontWeight: 600 },
+      hero:    { fontSize: '28px', color: colors.highlight, fontWeight: 600, letterSpacing: '-0.01em' },
     };
 
     function MSTRCycleTool() {
-      // ============ CORE PRICE STATE (prompt-driven) ============
-      const [mstrPrice, setMstrPrice] = useState(187);
-      const [btcPrice, setBtcPrice] = useState(80000);
-      const [ma200, setMa200] = useState(null);
+      // Core state vectors
+      const [mstrPrice, setMstrPrice] = useState(164.77);
+      const [btcPrice, setBtcPrice] = useState(76900);
+      const [ma200, setMa200] = useState(229.54);
       const [lastUpdated, setLastUpdated] = useState(null);
       const [pasteText, setPasteText] = useState('');
       const [pasteResult, setPasteResult] = useState(null);
 
-      // ============ TECHNICAL LEVELS (prompt-driven) ============
-      const [high20, setHigh20] = useState(null);
-      const [low20, setLow20] = useState(null);
-      const [high50, setHigh50] = useState(null);
-      const [low50, setLow50] = useState(null);
-      const [low200, setLow200] = useState(null);
-      const [atr14, setAtr14] = useState(null);
+      // Technical thresholds
+      const [high20, setHigh20] = useState(197.00);
+      const [low20, setLow20] = useState(162.02);
+      const [high50, setHigh50] = useState(224.50);
+      const [low50, setLow50] = useState(135.00);
+      const [low200, setLow200] = useState(104.17);
+      const [atr14, setAtr14] = useState(13.00);
 
-      // ============ STRATEGY STATE (persisted) ============
-      const [nupl, setNupl] = useState(19);
+      // Strategy profiles
+      const [nupl, setNupl] = useState(28);
       const [mvrv, setMvrv] = useState(1.4);
-      const [fundingNegative, setFundingNegative] = useState(false);
+      const [fundingNegative, setFundingNegative] = useState(true);
       const [derivativesExhaustion, setDerivativesExhaustion] = useState(false);
-      const [below200ma, setBelow200ma] = useState(false);
+      const [below200ma, setBelow200ma] = useState(true);
       const [weeklyLowerLow, setWeeklyLowerLow] = useState(false);
       const [dxyAbove110, setDxyAbove110] = useState(false);
-      const [btcHoldings, setBtcHoldings] = useState(818869);
-      const [dilutedShares, setDilutedShares] = useState(280);
-      const [corporateBaseUpdated, setCorporateBaseUpdated] = useState(null);
-      const [startingShares, setStartingShares] = useState(211);
-      const [cashBuffer, setCashBuffer] = useState(0);  
+      const [btcHoldings, setBtcHoldings] = useState(843738);
+      const [dilutedShares, setDilutedShares] = useState(384.1);
+      const [corporateBaseUpdated, setCorporateBaseUpdated] = useState('2026-05-18');
+      const [startingShares, setStartingShares] = useState(200);
+      const [cashBuffer, setCashBuffer] = useState(9958);  
       const [gbpUsd, setGbpUsd] = useState(1.27);       
 
-      // Level overrides (persisted)
       const [levelsAuto, setLevelsAuto] = useState(true);
       const [manualSellLow, setManualSellLow] = useState(192);
       const [manualSellHigh, setManualSellHigh] = useState(200);
       const [manualBuyLow, setManualBuyLow] = useState(170);
       const [manualBuyHigh, setManualBuyHigh] = useState(180);
 
-      // Journal/snapshots
       const [trades, setTrades] = useState([]);
       const [snapshots, setSnapshots] = useState([]);
-
-      // ============ AGGRESSION PROFILE (persisted) ============
       const [aggressionStyle, setAggressionStyle] = useState('moderate'); 
-
-      // ============ ACTIVE POSITIONS (persisted) ============
       const [positions, setPositions] = useState([]);
       const [positionForm, setPositionForm] = useState({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' });
       const [exitPrices, setExitPrices] = useState({});
@@ -87,11 +90,11 @@
       const [tradeFees, setTradeFees] = useState('');
       const [promptCopied, setPromptCopied] = useState(false);
 
-      // ============ LOAD/PERSIST ============
+      // System IO state hooks
       useEffect(() => {
         const load = async () => {
           try {
-            const settings = await window.storage.get('mstr:settings');
+            const settings = await nativeStorage.get('mstr:settings');
             if (settings?.value) {
               const s = JSON.parse(settings.value);
               if (s.mstrPrice !== undefined) setMstrPrice(s.mstrPrice);
@@ -125,9 +128,9 @@
               if (s.aggressionStyle !== undefined) setAggressionStyle(s.aggressionStyle);
             }
           } catch (e) {}
-          try { const t = await window.storage.get('mstr:trades'); if (t?.value) setTrades(JSON.parse(t.value)); } catch (e) {}
-          try { const sn = await window.storage.get('mstr:snapshots'); if (sn?.value) setSnapshots(JSON.parse(sn.value)); } catch (e) {}
-          try { const pos = await window.storage.get('mstr:positions'); if (pos?.value) setPositions(JSON.parse(pos.value)); } catch (e) {}
+          try { const t = await nativeStorage.get('mstr:trades'); if (t?.value) setTrades(JSON.parse(t.value)); } catch (e) {}
+          try { const sn = await nativeStorage.get('mstr:snapshots'); if (sn?.value) setSnapshots(JSON.parse(sn.value)); } catch (e) {}
+          try { const pos = await nativeStorage.get('mstr:positions'); if (pos?.value) setPositions(JSON.parse(pos.value)); } catch (e) {}
         };
         load();
       }, []);
@@ -135,7 +138,7 @@
       useEffect(() => {
         const save = async () => {
           try {
-            await window.storage.set('mstr:settings', JSON.stringify({
+            await nativeStorage.set('mstr:settings', JSON.stringify({
               mstrPrice, btcPrice, ma200, lastUpdated,
               high20, low20, high50, low50, low200, atr14,
               nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma,
@@ -147,31 +150,20 @@
           } catch (e) {}
         };
         save();
-      }, [mstrPrice, btcPrice, ma200, lastUpdated,
-          high20, low20, high50, low50, low200, atr14,
-          nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma,
-          weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares,
-          corporateBaseUpdated, startingShares, cashBuffer, gbpUsd,
-          levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh,
-          aggressionStyle]);
+      }, [mstrPrice, btcPrice, ma200, lastUpdated, high20, low20, high50, low50, low200, atr14, nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma, weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares, corporateBaseUpdated, startingShares, cashBuffer, gbpUsd, levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh, aggressionStyle]);
 
       const handleHoldingsChange = (v) => { setBtcHoldings(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
       const handleSharesChange = (v) => { setDilutedShares(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
 
-      // ============ DERIVED CALCS ============
+      // Math derivations
       const btcPerShare = useMemo(() => btcHoldings / (dilutedShares * 1_000_000), [btcHoldings, dilutedShares]);
       const fairValue = useMemo(() => btcPerShare * btcPrice, [btcPerShare, btcPrice]);
       const mNAV = useMemo(() => fairValue > 0 ? mstrPrice / fairValue : 0, [mstrPrice, fairValue]);
 
       const cycleData = useMemo(() => {
-        const ath = new Date('2025-10-06');
-        const target = new Date('2026-10-06');
-        const now = new Date();
-        const totalDays = Math.round((target - ath) / 86400000);
-        const elapsed = Math.round((now - ath) / 86400000);
-        const remaining = Math.round((target - now) / 86400000);
-        const progress = Math.min(100, Math.max(0, (elapsed / totalDays) * 100));
-        return { totalDays, elapsed, remaining, progress };
+        const ath = new Date('2025-10-06'); const target = new Date('2026-10-06'); const now = new Date();
+        const totalDays = Math.round((target - ath) / 86400000); const elapsed = Math.round((now - ath) / 86400000);
+        return { totalDays, elapsed, remaining: Math.round((target - now) / 86400000), progress: Math.min(100, Math.max(0, (elapsed / totalDays) * 100)) };
       }, [lastUpdated]);
 
       const daysSinceBaseUpdate = useMemo(() => {
@@ -179,178 +171,81 @@
         return Math.floor((new Date() - new Date(corporateBaseUpdated)) / 86400000);
       }, [corporateBaseUpdated, lastUpdated]);
 
-      // ============ AGGRESSION PROFILE ============
       const profile = useMemo(() => {
         switch (aggressionStyle) {
-          case 'conservative':
-            return { label: 'Conservative', rotationSizePctLow: 15, rotationSizePctHigh: 20, bandWidthMult: 0.55, hoardSensitivity: 1.15, deployLadderSteepness: 0.9, note: 'Wider bands, smaller rotations, quicker to HOARD.' };
-          case 'aggressive':
-            return { label: 'Aggressive', rotationSizePctLow: 35, rotationSizePctHigh: 45, bandWidthMult: 0.28, hoardSensitivity: 0.85, deployLadderSteepness: 1.15, note: 'Tighter bands, larger rotations, holds ROTATE longer.' };
-          default:
-            return { label: 'Moderate (Base)', rotationSizePctLow: 25, rotationSizePctHigh: 30, bandWidthMult: 0.4, hoardSensitivity: 1.0, deployLadderSteepness: 1.0, note: 'Balanced — base case per the playbook.' };
+          case 'conservative': return { label: 'Conservative', rotationSizePctLow: 15, rotationSizePctHigh: 20, bandWidthMult: 0.55, hoardSensitivity: 1.15, deployLadderSteepness: 0.9, note: 'Wider bands, smaller rotations, quicker to HOARD.' };
+          case 'aggressive': return { label: 'Aggressive', rotationSizePctLow: 35, rotationSizePctHigh: 45, bandWidthMult: 0.28, hoardSensitivity: 0.85, deployLadderSteepness: 1.15, note: 'Tighter bands, larger rotations, holds ROTATE longer.' };
+          default: return { label: 'Moderate (Base)', rotationSizePctLow: 25, rotationSizePctHigh: 30, bandWidthMult: 0.4, hoardSensitivity: 1.0, deployLadderSteepness: 1.0, note: 'Balanced — base case per the playbook.' };
         }
       }, [aggressionStyle]);
 
-      // ============ DYNAMIC LEVELS ============
-      const technicals = useMemo(() => {
-        if (high20 === null || low20 === null || atr14 === null) return null;
-        return { high20, low20, high50, low50, low200, atr14 };
-      }, [high20, low20, high50, low50, low200, atr14]);
-
       const dynamicLevels = useMemo(() => {
         if (!technicals) return null;
-        const { high20, low20, atr14 } = technicals;
-        const current = mstrPrice;
-
-        const rotateSellTarget = Math.max(high20, current + atr14);
-        const rotateBuyTarget = Math.min(low20, current - atr14);
-        const bandWidth = atr14 * profile.bandWidthMult;
-
-        const hoardBuyAnchor = ma200 ? ma200 * 0.85 : current - atr14 * 2;
-        const hoardBuyDeep = ma200 ? ma200 * 0.75 : current - atr14 * 3;
-        const hoardBuyTarget = current - (current - hoardBuyAnchor) / profile.hoardSensitivity;
-        const hoardBuyDeepTarget = current - (current - hoardBuyDeep) / profile.hoardSensitivity;
-
-        const deployRungs = ma200
-          ? [
-              { level: current, pct: 25 },
-              { level: current - (current - ma200 * 0.85) * 0.5 * profile.deployLadderSteepness, pct: 25 },
-              { level: current - (current - ma200 * 0.85) * profile.deployLadderSteepness, pct: 25 },
-              { level: current - (current - ma200 * 0.65) * profile.deployLadderSteepness, pct: 25 },
-            ]
-          : [
-              { level: current, pct: 25 },
-              { level: current * (1 - 0.10 * profile.deployLadderSteepness), pct: 25 },
-              { level: current * (1 - 0.20 * profile.deployLadderSteepness), pct: 25 },
-              { level: current * (1 - 0.30 * profile.deployLadderSteepness), pct: 25 },
-            ];
+        const { high20, low20, atr14 } = technicals; const current = mstrPrice;
+        const rotateSellTarget = Math.max(high20, current + atr14); const rotateBuyTarget = Math.min(low20, current - atr14); const bandWidth = atr14 * profile.bandWidthMult;
+        const hoardBuyAnchor = ma200 ? ma200 * 0.85 : current - atr14 * 2; const hoardBuyDeep = ma200 ? ma200 * 0.75 : current - atr14 * 3;
 
         return {
           rotate: { sellLow: rotateSellTarget - bandWidth, sellHigh: rotateSellTarget + bandWidth, buyLow: rotateBuyTarget - bandWidth, buyHigh: rotateBuyTarget + bandWidth },
-          hoard: { sellLow: current + atr14 * 0.5, sellHigh: Math.max(high20, current + atr14 * 1.5), buyTarget: hoardBuyTarget, buyDeepTarget: hoardBuyDeepTarget },
-          deploy: { ladder: deployRungs },
+          hoard: { sellLow: current + atr14 * 0.5, sellHigh: Math.max(high20, current + atr14 * 1.5), buyTarget: current - (current - hoardBuyAnchor) / profile.hoardSensitivity, buyDeepTarget: current - (current - hoardBuyDeep) / profile.hoardSensitivity },
+          deploy: { ladder: ma200 ? [{ level: current, pct: 25 }, { level: current - (current - ma200 * 0.85) * 0.5 * profile.deployLadderSteepness, pct: 25 }, { level: current - (current - ma200 * 0.85) * profile.deployLadderSteepness, pct: 25 }, { level: current - (current - ma200 * 0.65) * profile.deployLadderSteepness, pct: 25 }] : [{ level: current, pct: 25 }, { level: current * (1 - 0.10 * profile.deployLadderSteepness), pct: 25 }, { level: current * (1 - 0.20 * profile.deployLadderSteepness), pct: 25 }, { level: current * (1 - 0.30 * profile.deployLadderSteepness), pct: 25 }] },
         };
       }, [technicals, ma200, mstrPrice, profile]);
 
-      // ============ SCORES + MODE ============
       const bearScore = useMemo(() => {
-        let s = 0;
-        if (btcPrice < 72500) s += 2;
-        if (btcPrice < 60000) s += 2;
-        if (nupl < 0) s += 2;
-        if (mvrv < 1.0) s += 1;
-        if (fundingNegative) s += 1;
-        if (below200ma) s += 2;
-        if (weeklyLowerLow) s += 1;
-        if (dxyAbove110) s += 1;
-        if (cycleData.remaining > 0 && cycleData.remaining < 180) s += 1;
-        return s;
+        let s = 0; if (btcPrice < 72500) s += 2; if (btcPrice < 60000) s += 2; if (nupl < 0) s += 2; if (mvrv < 1.0) s += 1; if (fundingNegative) s += 1; if (below200ma) s += 2; if (weeklyLowerLow) s += 1; if (dxyAbove110) s += 1; if (cycleData.remaining > 0 && cycleData.remaining < 180) s += 1; return s;
       }, [btcPrice, nupl, mvrv, fundingNegative, below200ma, weeklyLowerLow, dxyAbove110, cycleData]);
 
       const bottomScore = useMemo(() => {
-        let s = 0;
-        if (mstrPrice < 120) s += 2;
-        if (mstrPrice < 90) s += 2;
-        if (btcPrice < 55000) s += 2;
-        if (btcPrice < 45000) s += 2;
-        if (nupl < -25) s += 3;
-        if (mvrv < 0.8) s += 3;
-        if (derivativesExhaustion) s += 2;
-        if (Math.abs(cycleData.remaining) < 60) s += 2;
-        return s;
+        let s = 0; if (mstrPrice < 120) s += 2; if (mstrPrice < 90) s += 2; if (btcPrice < 55000) s += 2; if (btcPrice < 45000) s += 2; if (nupl < -25) s += 3; if (mvrv < 0.8) s += 3; if (derivativesExhaustion) s += 2; if (Math.abs(cycleData.remaining) < 60) s += 2; return s;
       }, [mstrPrice, btcPrice, nupl, mvrv, derivativesExhaustion, cycleData]);
 
-      const mode = useMemo(() => {
-        if (bottomScore >= 7 && mstrPrice < 140) return 'DEPLOY';
-        if (bearScore >= 6) return 'HOARD';
-        return 'ROTATE';
-      }, [bearScore, bottomScore, mstrPrice]);
-
-      const fmt = (v) => `$${Math.round(v)}`;
-      const fmtRange = (low, high) => `${fmt(low)}–${fmt(high)}`;
-
-      const levelDisplay = useMemo(() => {
-        if (!levelsAuto || !dynamicLevels) {
-          return {
-            rotate: { sell: fmtRange(manualSellLow, manualSellHigh), buy: fmtRange(manualBuyLow, manualBuyHigh) },
-            hoard: { sell: fmtRange(manualSellLow, manualSellHigh), buy: `Wait — target ${fmt(manualBuyLow * 0.7)}` },
-            deploy: { sell: 'Do not sell', buy: 'Ladder every 10% drop' },
-          };
-        }
-        const d = dynamicLevels;
-        return {
-          rotate: { sell: fmtRange(d.rotate.sellLow, d.rotate.sellHigh), buy: fmtRange(d.rotate.buyLow, d.rotate.buyHigh) },
-          hoard: { sell: fmtRange(d.hoard.sellLow, d.hoard.sellHigh), buy: `Wait — target ${fmt(d.hoard.buyTarget)} / deep ${fmt(d.hoard.buyDeepTarget)}` },
-          deploy: { sell: 'Do not sell', buy: `Ladder: ${d.deploy.ladder.map(l => fmt(l.level)).join(' · ')}` },
-        };
-      }, [levelsAuto, dynamicLevels, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
+      const mode = useMemo(() => { if (bottomScore >= 7 && mstrPrice < 140) return 'DEPLOY'; if (bearScore >= 6) return 'HOARD'; return 'ROTATE'; }, [bearScore, bottomScore, mstrPrice]);
+      const currentLevels = useMemo(() => {
+        if (!levelsAuto || !dynamicLevels) return { rotate: { sell: fmtRange(manualSellLow, manualSellHigh), buy: fmtRange(manualBuyLow, manualBuyHigh) }, hoard: { sell: fmtRange(manualSellLow, manualSellHigh), buy: `Wait — target ${fmt(manualBuyLow * 0.7)}` }, deploy: { sell: 'Do not sell', buy: 'Ladder every 10% drop' } }[mode.toLowerCase()];
+        const d = dynamicLevels; return { rotate: { sell: fmtRange(d.rotate.sellLow, d.rotate.sellHigh), buy: fmtRange(d.rotate.buyLow, d.rotate.buyHigh) }, hoard: { sell: fmtRange(d.hoard.sellLow, d.hoard.sellHigh), buy: `Wait — target ${fmt(d.hoard.buyTarget)} / deep ${fmt(d.hoard.buyDeepTarget)}` }, deploy: { sell: 'Do not sell', buy: `Ladder: ${d.deploy.ladder.map(l => fmt(l.level)).join(' · ')}` } }[mode.toLowerCase()];
+      }, [levelsAuto, dynamicLevels, mode, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
 
       const alertLevels = useMemo(() => {
-        if (!levelsAuto || !dynamicLevels) {
-          return {
-            rotate: { sellAlert: manualSellLow, buyAlert: manualBuyHigh },
-            hoard:  { sellAlert: manualSellLow, buyAlert: manualBuyLow * 0.7, buyDeepAlert: null },
-            deploy: { sellAlert: null, ladder: [] },
-          };
-        }
-        const d = dynamicLevels;
-        return {
-          rotate: { sellAlert: d.rotate.sellLow, buyAlert: d.rotate.buyHigh },
-          hoard: { sellAlert: d.hoard.sellLow, buyAlert: d.hoard.buyTarget, buyDeepAlert: d.hoard.buyDeepTarget },
-          deploy: { sellAlert: null, ladder: d.deploy.ladder.map(r => r.level) },
-        };
+        if (!levelsAuto || !dynamicLevels) return { rotate: { sellAlert: manualSellLow, buyAlert: manualBuyHigh }, hoard: { sellAlert: manualSellLow, buyAlert: manualBuyLow * 0.7, buyDeepAlert: null }, deploy: { sellAlert: null, ladder: [] } };
+        const d = dynamicLevels; return { rotate: { sellAlert: d.rotate.sellLow, buyAlert: d.rotate.buyHigh }, hoard: { sellAlert: d.hoard.sellLow, buyAlert: d.hoard.buyTarget, buyDeepAlert: d.hoard.buyDeepTarget }, deploy: { sellAlert: null, ladder: d.deploy.ladder.map(r => r.level) } };
       }, [levelsAuto, dynamicLevels, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
 
-      // ============ MOVED DICTIONARIES UP HERE TO AVOID REFERENCE ERRORS ============
+      // Execution strategies dictionary configuration mapped prior to state instantiation
       const modeCfg = {
         ROTATE: { label: 'NORMAL ROTATION', color: '#d4a017', bg: '#1a1611', action: 'Sell at resistance, buy back at support.', cash: '0–25%' },
         HOARD:  { label: 'CASH HOARD',      color: '#c73e1d', bg: '#1a0f0d', action: 'Sell at resistance. Do NOT buy back. Wait for deeper levels.', cash: '40–70%' },
         DEPLOY: { label: 'DEPLOY CASH',     color: '#2d8659', bg: '#0f1a13', action: 'Ladder cash into weakness. All-in accumulation.', cash: 'Deploying to 0%' },
       };
       const cfg = modeCfg[mode];
-      const currentLevels = levelDisplay[mode.toLowerCase()];
       const deploySuppressed = bottomScore >= 7 && mstrPrice >= 140;
 
       const bandHits = useMemo(() => {
-        if (!dynamicLevels) return [];
-        const hits = []; const d = dynamicLevels; const p = mstrPrice;
+        if (!dynamicLevels) return []; const hits = []; const d = dynamicLevels; const p = mstrPrice;
         if (mode === 'ROTATE') {
           if (p >= d.rotate.sellLow && p <= d.rotate.sellHigh) { hits.push({ tag: 'ROTATE-SELL', side: 'SELL', label: 'ROTATE sell zone hit', zone: `${fmt(d.rotate.sellLow)}–${fmt(d.rotate.sellHigh)}`, price: p }); }
           if (p >= d.rotate.buyLow && p <= d.rotate.buyHigh) { hits.push({ tag: 'ROTATE-BUY', side: 'BUY', label: 'ROTATE buy zone hit', zone: `${fmt(d.rotate.buyLow)}–${fmt(d.rotate.buyHigh)}`, price: p }); }
         }
         if (mode === 'HOARD') {
           if (p >= d.hoard.sellLow && p <= d.hoard.sellHigh) { hits.push({ tag: 'HOARD-SELL', side: 'SELL', label: 'HOARD sell zone hit', zone: `${fmt(d.hoard.sellLow)}–${fmt(d.hoard.sellHigh)}`, price: p }); }
-          const t = d.hoard.buyTarget;
-          if (p >= t * 0.985 && p <= t * 1.015) { hits.push({ tag: 'HOARD-BUY', side: 'BUY', label: 'HOARD buy target reached', zone: fmt(t), price: p }); }
-          const dt = d.hoard.buyDeepTarget;
-          if (p <= dt * 1.015) { hits.push({ tag: 'HOARD-BUY-DEEP', side: 'BUY', label: 'HOARD deep buy target reached', zone: fmt(dt), price: p }); }
+          const t = d.hoard.buyTarget; if (p >= t * 0.985 && p <= t * 1.015) { hits.push({ tag: 'HOARD-BUY', side: 'BUY', label: 'HOARD buy target reached', zone: fmt(t), price: p }); }
+          const dt = d.hoard.buyDeepTarget; if (p <= dt * 1.015) { hits.push({ tag: 'HOARD-BUY-DEEP', side: 'BUY', label: 'HOARD deep buy target reached', zone: fmt(dt), price: p }); }
         }
-        if (mode === 'DEPLOY') {
-          d.deploy.ladder.forEach((rung, i) => {
-            if (p <= rung.level * 1.015) { hits.push({ tag: `DEPLOY-RUNG-${i + 1}`, side: 'BUY', label: `DEPLOY rung ${i + 1} live (${rung.pct}%)`, zone: fmt(rung.level), price: p }); }
-          });
-        }
+        if (mode === 'DEPLOY') { d.deploy.ladder.forEach((rung, i) => { if (p <= rung.level * 1.015) { hits.push({ tag: `DEPLOY-RUNG-${i + 1}`, side: 'BUY', label: `DEPLOY rung ${i + 1} live (${rung.pct}%)`, zone: fmt(rung.level), price: p }); } }); }
         return hits;
       }, [dynamicLevels, mstrPrice, mode]);
 
       const priceRange = useMemo(() => {
-        if (!dynamicLevels) return null;
-        const RED = '#c73e1d', GREEN = '#2d8659', GOLD = '#d4a017';
-        const p = mstrPrice; const d = dynamicLevels;
+        if (!dynamicLevels) return null; const RED = '#c73e1d', GREEN = '#2d8659', GOLD = '#d4a017'; const p = mstrPrice; const d = dynamicLevels;
         if (mode === 'ROTATE') {
           const lo = d.rotate.buyLow; const hi = d.rotate.sellHigh; const span = hi - lo;
-          const pct = span > 0 ? Math.max(0, Math.min(1, (p - lo) / span)) : 0.5;
-          const inSell = p >= d.rotate.sellLow; const inBuy = p <= d.rotate.buyHigh;
-          return { pct, verdict: inSell ? 'IN SELL ZONE' : inBuy ? 'IN BUY ZONE' : 'BETWEEN BANDS', tone: inSell ? RED : inBuy ? GREEN : GOLD, lo, hi, buyLow: d.rotate.buyLow, buyHigh: d.rotate.buyHigh, sellLow: d.rotate.sellLow, sellHigh: d.rotate.sellHigh };
+          return { pct: span > 0 ? Math.max(0, Math.min(1, (p - lo) / span)) : 0.5, verdict: p >= d.rotate.sellLow ? 'IN SELL ZONE' : p <= d.rotate.buyHigh ? 'IN BUY ZONE' : 'BETWEEN BANDS', tone: p >= d.rotate.sellLow ? RED : p <= d.rotate.buyHigh ? GREEN : GOLD, lo, hi, buyLow: d.rotate.buyLow, buyHigh: d.rotate.buyHigh, sellLow: d.rotate.sellLow, sellHigh: d.rotate.sellHigh };
         }
         if (mode === 'HOARD') {
-          const target = d.hoard.buyTarget; const deep = d.hoard.buyDeepTarget;
-          const pctToTarget = ((p / target) - 1) * 100;
-          const inSell = p >= d.hoard.sellLow; const atTarget = p <= target * 1.015;
-          return { pct: null, verdict: inSell ? 'IN SELL ZONE' : atTarget ? 'AT BUY TARGET' : `${pctToTarget > 0 ? '+' : ''}${pctToTarget.toFixed(1)}% vs target`, tone: inSell ? RED : atTarget ? GREEN : GOLD, target, deep, sellLow: d.hoard.sellLow, sellHigh: d.hoard.sellHigh };
+          const target = d.hoard.buyTarget; const deep = d.hoard.buyDeepTarget; const pctToTarget = ((p / target) - 1) * 100;
+          return { pct: null, verdict: p >= d.hoard.sellLow ? 'IN SELL ZONE' : p <= target * 1.015 ? 'AT BUY TARGET' : `${pctToTarget > 0 ? '+' : ''}${pctToTarget.toFixed(1)}% vs target`, tone: p >= d.hoard.sellLow ? RED : p <= target * 1.015 ? GREEN : GOLD, target, deep, sellLow: d.hoard.sellLow, sellHigh: d.hoard.sellHigh };
         }
-        const liveRungs = d.deploy.ladder.filter(r => p <= r.level * 1.015);
-        return { pct: null, verdict: liveRungs.length > 0 ? `${liveRungs.length}/4 RUNGS LIVE` : 'ABOVE LADDER', tone: GREEN, ladder: d.deploy.ladder };
+        return { pct: null, verdict: d.deploy.ladder.filter(r => p <= r.level * 1.015).length > 0 ? `${d.deploy.ladder.filter(r => p <= r.level * 1.015).length}/4 RUNGS LIVE` : 'ABOVE LADDER', tone: GREEN, ladder: d.deploy.ladder };
       }, [dynamicLevels, mstrPrice, mode]);
 
       const journalStats = useMemo(() => {
@@ -365,22 +260,18 @@
       }, [trades, startingShares]);
 
       const portfolio = useMemo(() => {
-        const positionUSD = journalStats.currentShares * mstrPrice; const positionGBP = positionUSD / gbpUsd;
-        const totalGBP = positionGBP + cashBuffer; const cashPct = totalGBP > 0 ? (cashBuffer / totalGBP) * 100 : 0;
-        return { positionUSD, positionGBP, totalGBP, cashPct, positionPct: 100 - cashPct };
+        const positionUSD = journalStats.currentShares * mstrPrice; const positionGBP = positionUSD / gbpUsd; const totalGBP = positionGBP + cashBuffer;
+        return { positionUSD, positionGBP, totalGBP, cashPct: totalGBP > 0 ? (cashBuffer / totalGBP) * 100 : 0, positionPct: 100 - (totalGBP > 0 ? (cashBuffer / totalGBP) * 100 : 0) };
       }, [journalStats.currentShares, mstrPrice, gbpUsd, cashBuffer]);
 
       const claudePrompt = `Please web-search data and return values in code block.`;
-      const copyPrompt = async () => { try { await navigator.clipboard.writeText(claudePrompt); setPromptCopied(true); setTimeout(() => setPromptCopied(false), 2000); } catch (e) {} };
 
       const applyPaste = () => {
         if (!pasteText.trim()) return;
-        let text = pasteText.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
-        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        let text = pasteText.replace(/```[a-z]*\n?/gi, '').replace(/```/g, ''); const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
         for (const line of lines) {
           const m = line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/); if (!m) continue;
-          const key = m[1].toUpperCase(); const val = m[2].trim();
-          const numVal = parseFloat(val.replace(/[$,%]/g, '')); const boolVal = /^on$|^true$|^yes$|^1$/i.test(val);
+          const key = m[1].toUpperCase(); const val = m[2].trim(); const numVal = parseFloat(val.replace(/[$,%]/g, '')); const boolVal = /^on$|^true$|^yes$|^1$/i.test(val);
           switch (key) {
             case 'MSTR_PRICE': if (!isNaN(numVal)) setMstrPrice(numVal); break;
             case 'MSTR_200MA': if (!isNaN(numVal)) setMa200(numVal); break;
@@ -402,8 +293,7 @@
             case 'DXY_ABOVE_110': setDxyAbove110(boolVal); break;
           }
         }
-        setLastUpdated(new Date().toISOString().slice(0, 10)); setPasteResult({ ok: true, msg: 'Telemetry synced successfully.' }); setPasteText('');
-        setTimeout(() => setPasteResult(null), 4000);
+        setLastUpdated(new Date().toISOString().slice(0, 10)); setPasteText('');
       };
 
       const saveSnapshot = () => { setSnapshots([...snapshots, { date: new Date().toISOString(), mstrPrice, btcPrice, nupl, mvrv, mNAV: Number(mNAV.toFixed(2)), bearScore, bottomScore, mode }]); };
@@ -413,14 +303,6 @@
       const deleteTrade = (id) => setTrades(trades.filter(t => t.id !== id));
       const deletePosition = (id) => setPositions(positions.filter(p => p.id !== id));
       const deleteSnapshot = (date) => setSnapshots(snapshots.filter(s => s.date !== date));
-
-      const t = {
-        eyebrow: { fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase', color: colors.textMute },
-        meta:    { fontSize: '11px', color: colors.textDim },
-        body:    { fontSize: '13px', color: colors.text, lineHeight: 1.55 },
-        value:   { fontSize: '15px', color: colors.text, fontWeight: 600 },
-        hero:    { fontSize: '28px', color: colors.highlight, fontWeight: 600, letterSpacing: '-0.01em' },
-      };
 
       const NavButton = ({ id, label, secondary }) => (
         <button onClick={() => setView(id)} style={{
@@ -510,19 +392,17 @@
                   </div>
                 </div>
 
-                {/* TELEMETRY PASTING PORTAL */}
                 <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
                   <div style={t.value}>System Data Payload Upload</div>
                   <textarea value={pasteText} onChange={(e)=>setPasteText(e.target.value)} placeholder="Paste machine readout text block straight into here..." style={{ width: '100%', height: '100px', background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, marginTop: '8px', padding: '10px', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: '11px' }} />
                   <button onClick={applyPaste} style={{ width: '100%', padding: '12px', background: colors.green, color: '#fff', border: 'none', fontWeight: 600, marginTop: '8px', cursor: 'pointer', letterSpacing: '0.05em' }}>APPLY TELEMETRY ARRAY</button>
-                  {pasteResult && <div style={{ marginTop: '8px', color: colors.green, fontSize: '11px' }}>{pasteResult.msg}</div>}
                 </div>
               </>
             )}
 
             {view === 'positions' && (
               <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
-                <div style={sectionHeader}>◆ Active Order Position Book</div>
+                <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '16px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '8px', fontFamily: serif }}>◆ Active Order Position Book</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
                   <input type="number" placeholder="Shares" value={positionForm.shares} onChange={(e)=>setPositionForm({...positionForm, shares:e.target.value})} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px', fontFamily: serif }} />
                   <input type="number" placeholder="Entry Price" value={positionForm.entryPrice} onChange={(e)=>setPositionForm({...positionForm, entryPrice:e.target.value})} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px', fontFamily: serif }} />
@@ -535,7 +415,7 @@
                       <div style={t.body}>{p.shares} sh @ ${p.entryPrice.toFixed(2)} <span style={{fontSize:'10px', color:colors.textMute}}>({p.tag})</span></div>
                       <div style={{ display: 'flex', gap: '6px' }}>
                         <input type="number" placeholder="Exit Price" value={exitPrices[p.id] ?? ''} onChange={(e)=>setExitPrices({...exitPrices, [p.id]: e.target.value})} style={{ width: '80px', background: colors.panel, color: colors.text, border: `1px solid ${colors.border}`, padding: '4px' }} />
-                        <button onClick={()=> { if(exitPrices[p.id]) { closePosition(p.id, exitPrices[p.id]); } else { closePosition(p.id, mstrPrice); } }} style={{ background: colors.red, color: '#fff', border: 'none', padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>CLOSE</button>
+                        <button onClick={()=> { const v = exitPrices[p.id]; if(v) { closePosition(p.id, v); } else { closePosition(p.id, mstrPrice); } }} style={{ background: colors.red, color: '#fff', border: 'none', padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>CLOSE</button>
                         <button onClick={()=>deletePosition(p.id)} style={{ background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMute, padding: '4px', cursor: 'pointer' }}>✕</button>
                       </div>
                     </div>
@@ -546,7 +426,7 @@
 
             {view === 'journal' && (
               <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
-                <div style={sectionHeader}>◆ Trade Execution Journal</div>
+                <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '16px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '8px', fontFamily: serif }}>◆ Trade Execution Journal</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
                   <input type="number" placeholder="Shares" value={tradeShares} onChange={(e)=>setTradeShares(e.target.value)} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px' }} />
                   <input type="number" placeholder="Price" value={tradePrice} onChange={(e)=>setTradePrice(e.target.value)} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px' }} />
@@ -572,7 +452,7 @@
 
             {view === 'snapshots' && (
               <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
-                <div style={sectionHeader}>◆ System Evolution Log</div>
+                <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '16px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '8px', fontFamily: serif }}>◆ System Evolution Log</div>
                 {[...snapshots].reverse().map((s, idx) => (
                   <div key={idx} style={{ padding: '10px 0', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
                     <span style={{ color: colors.textDim }}>{s.date}</span>
@@ -587,7 +467,7 @@
 
             {view === 'backup' && (
               <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
-                <div style={sectionHeader}>◆ Portable Sovereign State Ledger</div>
+                <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '16px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '8px', fontFamily: serif }}>◆ Portable Sovereign State Ledger</div>
                 <button onClick={exportJSON} style={{ width: '100%', padding: '12px', background: colors.gold, color: '#000', border: 'none', fontWeight: 600, cursor: 'pointer' }}>EXPORT COMPACT SYSTEM TO CLIPBOARD</button>
                 <textarea value={importText} onChange={(e)=>setImportText(e.target.value)} placeholder="Paste your exported configuration string here..." style={{ width: '100%', height: '120px', background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, marginTop: '16px', padding: '10px', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: '10px' }} />
                 <button onClick={importJSON} style={{ width: '100%', padding: '12px', background: colors.green, color: '#fff', border: 'none', marginTop: '8px', fontWeight: 600, cursor: 'pointer' }}>RESTORE IMPORT VECTOR</button>
