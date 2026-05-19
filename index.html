@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MSTR Rotation Tool Terminal</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body style="margin:0; background-color:#0a0806;">
+
+  <div id="mstr-app-root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // mock storage structure for standard browser environments
+    window.storage = window.storage || {
+      get: async (key) => ({ value: localStorage.getItem(key) }),
+      set: async (key, val) => localStorage.setItem(key, val)
+    };
+
+    function MSTRCycleTool() {
+      // ============ CORE PRICE STATE (prompt-driven) ============
+      const [mstrPrice, setMstrPrice] = useState(187);
+      const [btcPrice, setBtcPrice] = useState(80000);
+      const [ma200, setMa200] = useState(null);
+      const [lastUpdated, setLastUpdated] = useState(null);
+      const [pasteText, setPasteText] = useState('');
+      const [pasteResult, setPasteResult] = useState(null);
+
+      // ============ TECHNICAL LEVELS (prompt-driven) ============
+      const [high20, setHigh20] = useState(null);
+      const [low20, setLow20] = useState(null);
+      const [high50, setHigh50] = useState(null);
+      const [low50, setLow50] = useState(null);
+      const [low200, setLow200] = useState(null);
+      const [atr14, setAtr14] = useState(null);
+
+      // ============ STRATEGY STATE (persisted) ============
+      const [nupl, setNupl] = useState(19);
+      const [mvrv, setMvrv] = useState(1.4);
+      const [fundingNegative, setFundingNegative] = useState(false);
+      const [derivativesExhaustion, setDerivativesExhaustion] = useState(false);
+      const [below200ma, setBelow200ma] = useState(false);
+      const [weeklyLowerLow, setWeeklyLowerLow] = useState(false);
+      const [dxyAbove110, setDxyAbove110] = useState(false);
+      const [btcHoldings, setBtcHoldings] = useState(818869);
+      const [dilutedShares, setDilutedShares] = useState(280);
+      const [corporateBaseUpdated, setCorporateBaseUpdated] = useState(null);
+      const [startingShares, setStartingShares] = useState(211);
+      const [cashBuffer, setCashBuffer] = useState(0);
+      const [gbpUsd, setGbpUsd] = useState(1.27);
+
+      const [levelsAuto, setLevelsAuto] = useState(true);
+      const [manualSellLow, setManualSellLow] = useState(192);
+      const [manualSellHigh, setManualSellHigh] = useState(200);
+      const [manualBuyLow, setManualBuyLow] = useState(170);
+      const [manualBuyHigh, setManualBuyHigh] = useState(180);
+
+      const [trades, setTrades] = useState([]);
+      const [snapshots, setSnapshots] = useState([]);
+      const [aggressionStyle, setAggressionStyle] = useState('moderate');
+      const [positions, setPositions] = useState([]);
+      const [positionForm, setPositionForm] = useState({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' });
+      const [exitPrices, setExitPrices] = useState({});
+      const [view, setView] = useState('dashboard');
+      const [tradeType, setTradeType] = useState('SELL');
+      const [tradeShares, setTradeShares] = useState('');
+      const [tradePrice, setTradePrice] = useState('');
+      const [tradeDate, setTradeDate] = useState(new Date().toISOString().slice(0, 10));
+      const [tradeFees, setTradeFees] = useState('');
+      const [promptCopied, setPromptCopied] = useState(false);
+
+      // ============ LOAD/PERSIST ============
+      useEffect(() => {
+        const load = async () => {
+          try {
+            const settings = await window.storage.get('mstr:settings');
+            if (settings?.value) {
+              const s = JSON.parse(settings.value);
+              if (s.mstrPrice !== undefined) setMstrPrice(s.mstrPrice);
+              if (s.btcPrice !== undefined) setBtcPrice(s.btcPrice);
+              if (s.ma200 !== undefined) setMa200(s.ma200);
+              if (s.lastUpdated !== undefined) setLastUpdated(s.lastUpdated);
+              if (s.high20 !== undefined) setHigh20(s.high20);
+              if (s.low20 !== undefined) setLow20(s.low20);
+              if (s.high50 !== undefined) setHigh50(s.high50);
+              if (s.low50 !== undefined) setLow50(s.low50);
+              if (s.low200 !== undefined) setLow200(s.low200);
+              if (s.atr14 !== undefined) setAtr14(s.atr14);
+              if (s.nupl !== undefined) setNupl(s.nupl);
+              if (s.mvrv !== undefined) setMvrv(s.mvrv);
+              if (s.fundingNegative !== undefined) setFundingNegative(s.fundingNegative);
+              if (s.derivativesExhaustion !== undefined) setDerivativesExhaustion(s.derivativesExhaustion);
+              if (s.below200ma !== undefined) setBelow200ma(s.below200ma);
+              if (s.weeklyLowerLow !== undefined) setWeeklyLowerLow(s.weeklyLowerLow);
+              if (s.dxyAbove110 !== undefined) setDxyAbove110(s.dxyAbove110);
+              if (s.btcHoldings !== undefined) setBtcHoldings(s.btcHoldings);
+              if (s.dilutedShares !== undefined) setDilutedShares(s.dilutedShares);
+              if (s.corporateBaseUpdated !== undefined) setCorporateBaseUpdated(s.corporateBaseUpdated);
+              if (s.startingShares !== undefined) setStartingShares(s.startingShares);
+              if (s.cashBuffer !== undefined) setCashBuffer(s.cashBuffer);
+              if (s.gbpUsd !== undefined) setGbpUsd(s.gbpUsd);
+              if (s.levelsAuto !== undefined) setLevelsAuto(s.levelsAuto);
+              if (s.manualSellLow !== undefined) setManualSellLow(s.manualSellLow);
+              if (s.manualSellHigh !== undefined) setManualSellHigh(s.manualSellHigh);
+              if (s.manualBuyLow !== undefined) setManualBuyLow(s.manualBuyLow);
+              if (s.manualBuyHigh !== undefined) setManualBuyHigh(s.manualBuyHigh);
+              if (s.aggressionStyle !== undefined) setAggressionStyle(s.aggressionStyle);
+            }
+          } catch (e) {}
+          try { const t = await window.storage.get('mstr:trades'); if (t?.value) setTrades(JSON.parse(t.value)); } catch (e) {}
+          try { const sn = await window.storage.get('mstr:snapshots'); if (sn?.value) setSnapshots(JSON.parse(sn.value)); } catch (e) {}
+          try { const pos = await window.storage.get('mstr:positions'); if (pos?.value) setPositions(JSON.parse(pos.value)); } catch (e) {}
+        };
+        load();
+      }, []);
+
+      useEffect(() => {
+        const save = async () => {
+          try {
+            await window.storage.set('mstr:settings', JSON.stringify({
+              mstrPrice, btcPrice, ma200, lastUpdated,
+              high20, low20, high50, low50, low200, atr14,
+              nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma,
+              weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares,
+              corporateBaseUpdated, startingShares, cashBuffer, gbpUsd,
+              levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh,
+              aggressionStyle,
+            }));
+          } catch (e) {}
+        };
+        save();
+      }, [mstrPrice, btcPrice, ma200, lastUpdated,
+          high20, low20, high50, low50, low200, atr14,
+          nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma,
+          weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares,
+          corporateBaseUpdated, startingShares, cashBuffer, gbpUsd,
+          levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh,
+          aggressionStyle]);
+
+      const handleHoldingsChange = (v) => { setBtcHoldings(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
+      const handleSharesChange = (v) => { setDilutedShares(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
+
+      // ============ DERIVED CALCS ============
+      const btcPerShare = useMemo(() => btcHoldings / (dilutedShares * 1_000_000), [btcHoldings, dilutedShares]);
+      const fairValue = useMemo(() => btcPerShare * btcPrice, [btcPerShare, btcPrice]);
+      const mNAV = useMemo(() => fairValue > 0 ? mstrPrice / fairValue : 0, [mstrPrice, fairValue]);
+
+      const cycleData = useMemo(() => {
+        const ath = new Date('2025-10-06');
+        const target = new Date('2026-10-06');
+        const now = new Date();
+        const totalDays = Math.round((target - ath) / 86400000);
+        const elapsed = Math.round((now - ath) / 86400000);
+        const remaining = Math.round((target - now) / 86400000);
+        const progress = Math.min(100, Math.max(0, (elapsed / totalDays) * 100));
+        return { totalDays, elapsed, remaining, progress };
+      }, [lastUpdated]);
+
+      const daysSinceBaseUpdate = useMemo(() => {
+        if (!corporateBaseUpdated) return null;
+        return Math.floor((new Date() - new Date(corporateBaseUpdated)) / 86400000);
+      }, [corporateBaseUpdated, lastUpdated]);
+
+      // ============ AGGRESSION PROFILE ============
+      const profile = useMemo(() => {
+        switch (aggressionStyle) {
+          case 'conservative':
+            return {
+              label: 'Conservative', rotationSizePctLow: 15, rotationSizePctHigh: 20, bandWidthMult: 0.55, hoardSensitivity: 1.15, deployLadderSteepness: 0.9, note: 'Wider bands, smaller rotations, quicker to HOARD.',
+            };
+          case 'aggressive':
+            return {
+              label: 'Aggressive', rotationSizePctLow: 35, rotationSizePctHigh: 45, bandWidthMult: 0.28, hoardSensitivity: 0.85, deployLadderSteepness: 1.15, note: 'Tighter bands, larger rotations, holds ROTATE longer.',
+            };
+          default:
+            return {
+              label: 'Moderate (Base)', rotationSizePctLow: 25, rotationSizePctHigh: 30, bandWidthMult: 0.4, hoardSensitivity: 1.0, deployLadderSteepness: 1.0, note: 'Balanced — base case per the playbook.',
+            };
+        }
+      }, [aggressionStyle]);
+
+      // ============ DYNAMIC LEVELS ============
+      const technicals = useMemo(() => {
+        if (high20 === null || low20 === null || atr14 === null) return null;
+        return { high20, low20, high50, low50, low200, atr14 };
+      }, [high20, low20, high50, low50, low200, atr14]);
+
+      const dynamicLevels = useMemo(() => {
+        if (!technicals) return null;
+        const { high20, low20, atr14 } = technicals;
+        const current = mstrPrice;
+
+        const rotateSellTarget = Math.max(high20, current + atr14);
+        const rotateBuyTarget = Math.min(low20, current - atr14);
+        const bandWidth = atr14 * profile.bandWidthMult;
+
+        const hoardBuyAnchor = ma200 ? ma200 * 0.85 : current - atr14 * 2;
+        const hoardBuyDeep = ma200 ? ma200 * 0.75 : current - atr14 * 3;
+        const hoardBuyTarget = current - (current - hoardBuyAnchor) / profile.hoardSensitivity;
+        const hoardBuyDeepTarget = current - (current - hoardBuyDeep) / profile.hoardSensitivity;
+
+        const deployRungs = ma200
+          ? [
+              { level: current, pct: 25 },
+              { level: current - (current - ma200 * 0.85) * 0.5 * profile.deployLadderSteepness, pct: 25 },
+              { level: current - (current - ma200 * 0.85) * profile.deployLadderSteepness, pct: 25 },
+              { level: current - (current - ma200 * 0.65) * profile.deployLadderSteepness, pct: 25 },
+            ]
+          : [
+              { level: current, pct: 25 },
+              { level: current * (1 - 0.10 * profile.deployLadderSteepness), pct: 25 },
+              { level: current * (1 - 0.20 * profile.deployLadderSteepness), pct: 25 },
+              { level: current * (1 - 0.30 * profile.deployLadderSteepness), pct: 25 },
+            ];
+
+        return {
+          rotate: { sellLow: rotateSellTarget - bandWidth, sellHigh: rotateSellTarget + bandWidth, buyLow: rotateBuyTarget - bandWidth, buyHigh: rotateBuyTarget + bandWidth },
+          hoard: { sellLow: current + atr14 * 0.5, sellHigh: Math.max(high20, current + atr14 * 1.5), buyTarget: hoardBuyTarget, buyDeepTarget: hoardBuyDeepTarget },
+          deploy: { ladder: deployRungs },
+        };
+      }, [technicals, ma200, mstrPrice, profile]);
+
+      // ============ SCORES + MODE ============
+      const bearScore = useMemo(() => {
+        let s = 0;
+        if (btcPrice < 72500) s += 2;
+        if (btcPrice < 60000) s += 2;
+        if (nupl < 0) s += 2;
+        if (mvrv < 1.0) s += 1;
+        if (fundingNegative) s += 1;
+        if (below200ma) s += 2;
+        if (weeklyLowerLow) s += 1;
+        if (dxyAbove110) s += 1;
+        if (cycleData.remaining > 0 && cycleData.remaining < 180) s += 1;
+        return s;
+      }, [btcPrice, nupl, mvrv, fundingNegative, below200ma, weeklyLowerLow, dxyAbove110, cycleData]);
+
+      const bottomScore = useMemo(() => {
+        let s = 0;
+        if (mstrPrice < 120) s += 2;
+        if (mstrPrice < 90) s += 2;
+        if (btcPrice < 55000) s += 2;
+        if (btcPrice < 45000) s += 2;
+        if (nupl < -25) s += 3;
+        if (mvrv < 0.8) s += 3;
+        if (derivativesExhaustion) s += 2;
+        if (Math.abs(cycleData.remaining) < 60) s += 2;
+        return s;
+      }, [mstrPrice, btcPrice, nupl, mvrv, derivativesExhaustion, cycleData]);
+
+      const mode = useMemo(() => {
+        if (bottomScore >= 7 && mstrPrice < 140) return 'DEPLOY';
+        if (bearScore >= 6) return 'HOARD';
+        return 'ROTATE';
+      }, [bearScore, bottomScore, mstrPrice]);
+
+      const fmt = (v) => `$${Math.round(v)}`;
+      const fmtRange = (low, high) => `${fmt(low)}–${fmt(high)}`;
+
+      const levelDisplay = useMemo(() => {
+        if (!levelsAuto || !dynamicLevels) {
+          return {
+            rotate: { sell: fmtRange(manualSellLow, manualSellHigh), buy: fmtRange(manualBuyLow, manualBuyHigh) },
+            hoard: { sell: fmtRange(manualSellLow, manualSellHigh), buy: `Wait — target ${fmt(manualBuyLow * 0.7)}` },
+            deploy: { sell: 'Do not sell', buy: 'Ladder every 10% drop' },
+          };
+        }
+        const d = dynamicLevels;
+        return {
+          rotate: { sell: fmtRange(d.rotate.sellLow, d.rotate.sellHigh), buy: fmtRange(d.rotate.buyLow, d.rotate.buyHigh) },
+          hoard: { sell: fmtRange(d.hoard.sellLow, d.hoard.sellHigh), buy: `Wait — target ${fmt(d.hoard.buyTarget)} / deep ${fmt(d.hoard.buyDeepTarget)}` },
+          deploy: { sell: 'Do not sell', buy: `Ladder: ${d.deploy.ladder.map(l => fmt(l.level)).join(' · ')}` },
+        };
+      }, [levelsAuto, dynamicLevels, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
+
+      const alertLevels = useMemo(() => {
+        if (!levelsAuto || !dynamicLevels) {
+          return {
+            rotate: { sellAlert: manualSellLow, buyAlert: manualBuyHigh },
+            hoard:  { sellAlert: manualSellLow, buyAlert: manualBuyLow * 0.7, buyDeepAlert: null },
+            deploy: { sellAlert: null, ladder: [] },
+          };
+        }
+        const d = dynamicLevels;
+        return {
+          rotate: { sellAlert: d.rotate.sellLow, buyAlert: d.rotate.buyHigh },
+          hoard: { sellAlert: d.hoard.sellLow, buyAlert: d.hoard.buyTarget, buyDeepAlert: d.hoard.buyDeepTarget },
+          deploy: { sellAlert: null, ladder: d.deploy.ladder.map(r => r.level) },
+        };
+      }, [levelsAuto, dynamicLevels, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
+
+      const modeCfg = {
+        ROTATE: { label: 'NORMAL ROTATION', color: '#d4a017', bg: '#1a1611', action: 'Sell at resistance, buy back at support.', cash: '0–25%' },
+        HOARD:  { label: 'CASH HOARD',      color: '#c73e1d', bg: '#1a0f0d', action: 'Sell at resistance. Do NOT buy back. Wait for deeper levels.', cash: '40–70%' },
+        DEPLOY: { label: 'DEPLOY CASH',     color: '#2d8659', bg: '#0f1a13', action: 'Ladder cash into weakness. All-in accumulation.', cash: 'Deploying to 0%' },
+      };
+      const cfg = modeCfg[mode];
+      const currentLevels = levelDisplay[mode.toLowerCase()];
+      const deploySuppressed = bottomScore >= 7 && mstrPrice >= 140;
+
+      const bandHits = useMemo(() => {
+        if (!dynamicLevels) return [];
+        const hits = [];
+        const d = dynamicLevels;
+        const p = mstrPrice;
+        if (mode === 'ROTATE') {
+          if (p >= d.rotate.sellLow && p <= d.rotate.sellHigh) { hits.push({ tag: 'ROTATE-SELL', side: 'SELL', label: 'ROTATE sell zone hit', zone: `${fmt(d.rotate.sellLow)}–${fmt(d.rotate.sellHigh)}`, price: p }); }
+          if (p >= d.rotate.buyLow && p <= d.rotate.buyHigh) { hits.push({ tag: 'ROTATE-BUY', side: 'BUY', label: 'ROTATE buy zone hit', zone: `${fmt(d.rotate.buyLow)}–${fmt(d.rotate.buyHigh)}`, price: p }); }
+        }
+        if (mode === 'HOARD') {
+          if (p >= d.hoard.sellLow && p <= d.hoard.sellHigh) { hits.push({ tag: 'HOARD-SELL', side: 'SELL', label: 'HOARD sell zone hit', zone: `${fmt(d.hoard.sellLow)}–${fmt(d.hoard.sellHigh)}`, price: p }); }
+          const t = d.hoard.buyTarget;
+          if (p >= t * 0.985 && p <= t * 1.015) { hits.push({ tag: 'HOARD-BUY', side: 'BUY', label: 'HOARD buy target reached', zone: fmt(t), price: p }); }
+          const dt = d.hoard.buyDeepTarget;
+          if (p <= dt * 1.015) { hits.push({ tag: 'HOARD-BUY-DEEP', side: 'BUY', label: 'HOARD deep buy target reached', zone: fmt(dt), price: p }); }
+        }
+        if (mode === 'DEPLOY') {
+          d.deploy.ladder.forEach((rung, i) => {
+            if (p <= rung.level * 1.015) { hits.push({ tag: `DEPLOY-RUNG-${i + 1}`, side: 'BUY', label: `DEPLOY rung ${i + 1} live (${rung.pct}%)`, zone: fmt(rung.level), price: p }); }
+          });
+        }
+        return hits;
+      }, [dynamicLevels, mstrPrice, mode]);
+
+      const priceRange = useMemo(() => {
+        if (!dynamicLevels) return null;
+        const RED = '#c73e1d', GREEN = '#2d8659', GOLD = '#d4a017';
+        const p = mstrPrice;
+        const d = dynamicLevels;
+
+        if (mode === 'ROTATE') {
+          const lo = d.rotate.buyLow; const hi = d.rotate.sellHigh; const span = hi - lo;
+          const pct = span > 0 ? Math.max(0, Math.min(1, (p - lo) / span)) : 0.5;
+          const inSell = p >= d.rotate.sellLow; const inBuy = p <= d.rotate.buyHigh;
+          const verdict = inSell ? 'IN SELL ZONE' : inBuy ? 'IN BUY ZONE' : 'BETWEEN BANDS';
+          return { pct, verdict, tone: inSell ? RED : inBuy ? GREEN : GOLD, lo, hi, buyLow: d.rotate.buyLow, buyHigh: d.rotate.buyHigh, sellLow: d.rotate.sellLow, sellHigh: d.rotate.sellHigh };
+        }
+        if (mode === 'HOARD') {
+          const target = d.hoard.buyTarget; const deep = d.hoard.buyDeepTarget;
+          const pctToTarget = ((p / target) - 1) * 100;
+          const inSell = p >= d.hoard.sellLow; const atTarget = p <= target * 1.015;
+          const verdict = inSell ? 'IN SELL ZONE' : atTarget ? 'AT BUY TARGET' : `${pctToTarget > 0 ? '+' : ''}${pctToTarget.toFixed(1)}% vs target`;
+          return { pct: null, verdict, tone: inSell ? RED : atTarget ? GREEN : GOLD, target, deep, sellLow: d.hoard.sellLow, sellHigh: d.hoard.sellHigh };
+        }
+        const liveRungs = d.deploy.ladder.filter(r => p <= r.level * 1.015);
+        return { pct: null, verdict: liveRungs.length > 0 ? `${liveRungs.length}/4 RUNGS LIVE` : 'ABOVE LADDER', tone: GREEN, ladder: d.deploy.ladder };
+      }, [dynamicLevels, mstrPrice, mode]);
+
+      const journalStats = useMemo(() => {
+        let currentShares = startingShares; let totalCash = 0; let rotationShares = 0; let completedRotations = 0; let openSell = null;
+        const sorted = [...trades].sort((a, b) => a.date.localeCompare(b.date));
+        sorted.forEach(t => {
+          const gross = t.shares * t.price;
+          if (t.type === 'SELL') {
+            currentShares -= t.shares; totalCash += gross - (t.fees || 0); openSell = { shares: t.shares, price: t.price };
+          } else {
+            currentShares += t.shares; totalCash -= gross + (t.fees || 0);
+            if (openSell) {
+              rotationShares += (t.shares - openSell.shares); completedRotations += 1; openSell = null;
+            }
+          }
+        });
+        return { currentShares, totalCash, sharesDelta: currentShares - startingShares, sharesPct: startingShares > 0 ? ((currentShares - startingShares) / startingShares) * 100 : 0, rotationShares, completedRotations, tradeCount: trades.length };
+      }, [trades, startingShares]);
+
+      const portfolio = useMemo(() => {
+        const positionUSD = journalStats.currentShares * mstrPrice; const positionGBP = positionUSD / gbpUsd;
+        const totalGBP = positionGBP + cashBuffer; const cashPct = totalGBP > 0 ? (cashBuffer / totalGBP) * 100 : 0;
+        return { positionUSD, positionGBP, totalGBP, cashPct, positionPct: 100 - cashPct };
+      }, [journalStats.currentShares, mstrPrice, gbpUsd, cashBuffer]);
+
+      const claudePrompt = `Please web-search data and return values...`;
+      const copyPrompt = async () => { try { await navigator.clipboard.writeText(claudePrompt); setPromptCopied(true); setTimeout(() => setPromptCopied(false), 2000); } catch (e) {} };
+
+      const applyPaste = () => {
+        if (!pasteText.trim()) return;
+        let text = pasteText.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        const applied = []; const skipped = [];
+        for (const line of lines) {
+          const m = line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/);
+          if (!m) continue;
+          const key = m[1].toUpperCase(); const val = m[2].trim();
+          const numVal = parseFloat(val.replace(/[$,%]/g, '')); const boolVal = /^on$|^true$|^yes$|^1$/i.test(val);
+          switch (key) {
+            case 'MSTR_PRICE': if (!isNaN(numVal)) { setMstrPrice(numVal); applied.push(`MSTR $${numVal}`); } break;
+            case 'MSTR_200MA': if (!isNaN(numVal)) { setMa200(numVal); applied.push(`200MA $${numVal}`); } break;
+            case 'MSTR_20D_HIGH': if (!isNaN(numVal)) { setHigh20(numVal); applied.push(`20dH $${numVal}`); } break;
+            case 'MSTR_20D_LOW': if (!isNaN(numVal)) { setLow20(numVal); applied.push(`20dL $${numVal}`); } break;
+            case 'MSTR_50D_HIGH': if (!isNaN(numVal)) { setHigh50(numVal); applied.push(`50dH $${numVal}`); } break;
+            case 'MSTR_50D_LOW': if (!isNaN(numVal)) { setLow50(numVal); applied.push(`50dL $${numVal}`); } break;
+            case 'MSTR_200D_LOW': if (!isNaN(numVal)) { setLow200(numVal); applied.push(`200dL $${numVal}`); } break;
+            case 'MSTR_ATR14': if (!isNaN(numVal)) { setAtr14(numVal); applied.push(`ATR ${numVal}`); } break;
+            case 'BTC_PRICE': if (!isNaN(numVal)) { setBtcPrice(numVal); applied.push(`BTC $${numVal}`); } break;
+            case 'NUPL': if (!isNaN(numVal)) { setNupl(numVal); applied.push(`NUPL ${numVal}%`); } break;
+            case 'MVRV': if (!isNaN(numVal)) { setMvrv(numVal); applied.push(`MVRV ${numVal}`); } break;
+            case 'BTC_HOLDINGS': if (!isNaN(numVal)) { handleHoldingsChange(numVal); applied.push(`Holdings ${numVal}`); } break;
+            case 'DILUTED_SHARES': if (!isNaN(numVal)) { const shares = numVal > 10000 ? numVal / 1000000 : numVal; handleSharesChange(shares); applied.push(`Shares ${shares}M`); } break;
+            case 'BELOW_200MA': setBelow200ma(boolVal); break;
+            case 'WEEKLY_LL': setWeeklyLowerLow(boolVal); break;
+            case 'SHORTING': setFundingNegative(boolVal); break;
+            case 'EXHAUSTION': setDerivativesExhaustion(boolVal); break;
+            case 'DXY_ABOVE_110': setDxyAbove110(boolVal); break;
+          }
+        }
+        setLastUpdated(new Date().toISOString().slice(0, 10));
+        setPasteText('');
+      };
+
+      const saveSnapshot = () => {
+        const snap = { date: new Date().toISOString(), mstrPrice, btcPrice, nupl, mvrv, mNAV: Number(mNAV.toFixed(2)), bearScore, bottomScore, mode };
+        setSnapshots([...snapshots, snap]);
+      };
+
+      const addTrade = () => {
+        if (!tradeShares || !tradePrice) return;
+        const trade = { id: Date.now(), date: tradeDate, type: tradeType, shares: parseFloat(tradeShares), price: parseFloat(tradePrice), fees: parseFloat(tradeFees) || 0 };
+        setTrades([...trades, trade]);
+        setTradeShares(''); setTradePrice('');
+      };
+
+      const openPosition = () => {
+        if (!positionForm.shares || !positionForm.entryPrice) return;
+        const pos = { id: Date.now(), openedAt: new Date().toISOString(), shares: parseFloat(positionForm.shares), entryPrice: parseFloat(positionForm.entryPrice), stop: positionForm.stop ? parseFloat(positionForm.stop) : null, target: positionForm.target ? parseFloat(positionForm.target) : null, tag: positionForm.tag || 'MANUAL', notes: positionForm.notes || '', status: 'OPEN' };
+        setPositions([...positions, pos]);
+        setPositionForm({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' });
+      };
+
+      const closePosition = (id, exitPrice) => {
+        const pos = positions.find(p => p.id === id); if (!pos) return;
+        setPositions(positions.map(p => p.id === id ? { ...p, status: 'CLOSED', closedAt: new Date().toISOString(), exitPrice: parseFloat(exitPrice) } : p));
+        setTrades([...trades, { id: Date.now(), date: new Date().toISOString().slice(0, 10), type: 'SELL', shares: pos.shares, price: parseFloat(exitPrice), fees: 0, fromPositionId: id }]);
+      };
+
+      const t = {
+        eyebrow: { fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase', color: colors.textMute },
+        meta:    { fontSize: '11px', color: colors.textDim },
+        body:    { fontSize: '13px', color: colors.text, lineHeight: 1.55 },
+        value:   { fontSize: '15px', color: colors.text, fontWeight: 600 },
+        hero:    { fontSize: '28px', color: colors.highlight, fontWeight: 600, letterSpacing: '-0.01em' },
+      };
+
+      const NavButton = ({ id, label, secondary }) => (
+        <button onClick={() => setView(id)} style={{
+          background: view === id ? colors.panel : 'transparent',
+          color: view === id ? colors.gold : (secondary ? colors.textMute : colors.textDim),
+          border: `1px solid ${view === id ? colors.gold : colors.border}`,
+          padding: secondary ? '5px 10px' : '8px 14px', fontFamily: serif, fontSize: secondary ? '10px' : '11px',
+          letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', flex: 1, fontWeight: view === id ? 600 : 400, borderRadius: '2px'
+        }}>{label}</button>
+      );
+
+      return (
+        <div style={{ minHeight: '100vh', background: `linear-gradient(180deg, ${colors.bg} 0%, ${colors.panel} 100%)`, padding: '24px 16px', fontFamily: serif, color: colors.text }}>
+          <div style={{ maxWidth: '720px', margin: '0 auto' }}>
+            {/* HEADER */}
+            <div style={{ marginBottom: '24px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '20px' }}>
+              <div style={t.eyebrow}>Cycle Decision Framework · v13.1</div>
+              <h1 style={{ fontSize: '26px', color: colors.highlight, margin: '8px 0 0 0', fontStyle: 'italic', fontWeight: 400 }}>MSTR Rotation</h1>
+              <div style={{ display: 'flex', gap: '20px', fontSize: '12px', marginTop: '12px' }}>
+                <div>BTC: ${btcPrice.toLocaleString()}</div>
+                <div>MSTR: ${mstrPrice.toFixed(2)}</div>
+                <div>mNAV: {mNAV.toFixed(2)}x</div>
+              </div>
+            </div>
+
+            {/* NAV NAVIGATION */}
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                <NavButton id="dashboard" label="Dashboard" />
+                <NavButton id="positions" label={`Open · ${positions.filter(p=>p.status==='OPEN').length}`} />
+                <NavButton id="journal" label="Journal" />
+              </div>
+            </div>
+
+            {view === 'dashboard' && (
+              <div style={{ background: cfg.bg, border: `1px solid ${cfg.color}`, padding: '20px', borderRadius: '4px' }}>
+                <div style={{ ...t.eyebrow, color: cfg.color }}>Active mode</div>
+                <div style={{ ...t.hero, color: cfg.color, margin: '4px 0 12px 0' }}>{cfg.label}</div>
+                <div style={t.body}>{cfg.action}</div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginTop: '20px', paddingTop: '16px', borderTop: `1px solid ${colors.border}` }}>
+                  <div><div style={t.eyebrow}>Sell zone</div><div style={t.value}>{currentLevels.sell}</div></div>
+                  <div><div style={{...t.eyebrow, color: colors.gold}}>Alert Price</div><div style={{...t.value, color: colors.gold}}>{alertLevels.rotate?.buyAlert ? `$${alertLevels.rotate.buyAlert.toFixed(2)}` : '—'}</div></div>
+                  <div><div style={t.eyebrow}>Buy zone</div><div style={t.value}>{currentLevels.buy}</div></div>
+                </div>
+
+                <div style={{ marginTop: '24px' }}>
+                  <div style={t.eyebrow}>Data Pipeline Upload</div>
+                  <textarea value={pasteText} onChange={(e)=>setPasteText(e.target.value)} placeholder="Paste data array here..." style={{ width:'100%', height:'80px', background:colors.bg, color:colors.text, border:`1px solid ${colors.border}`, marginTop:'6px', padding:'8px', boxSizing:'border-box', fontFamily:'monospace', fontSize:'11px' }} />
+                  <button onClick={applyPaste} style={{ width:'100%', padding:'10px', background:colors.green, color:'#fff', border:'none', marginTop:'6px', fontWeight:600, cursor:'pointer' }}>APPLY SYSTEM PAYLOAD</button>
+                </div>
+              </div>
+            )}
+
+            {view === 'positions' && (
+              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px' }}>
+                <div style={t.value}>Open Active Order Book</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '12px' }}>
+                  <input type="number" placeholder="Shares" value={positionForm.shares} onChange={(e)=>setPositionForm({...positionForm, shares:e.target.value})} style={{ background:colors.bg, color:colors.text, border:`1px solid ${colors.border}`, padding:'8px' }} />
+                  <input type="number" placeholder="Entry Price" value={positionForm.entryPrice} onChange={(e)=>setPositionForm({...positionForm, entryPrice:e.target.value})} style={{ background:colors.bg, color:colors.text, border:`1px solid ${colors.border}`, padding:'8px' }} />
+                </div>
+                <button onClick={openPosition} style={{ width:'100%', padding:'10px', background:colors.gold, color:'#000', border:'none', marginTop:'10px', fontWeight:600 }}>INITIALIZE OPEN RECORD</button>
+                
+                <div style={{ marginTop: '20px' }}>
+                  {positions.map(p => p.status === 'OPEN' && (
+                    <div key={p.id} style={{ padding: '10px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>{p.shares} sh @ ${p.entryPrice}</div>
+                      <button onClick={()=>closePosition(p.id, mstrPrice)} style={{ background:colors.red, color:'#fff', border:'none', padding:'4px 8px' }}>CLOSE</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('mstr-app-root'));
+    root.render(<MSTRCycleTool />);
+  </script>
+</body>
+</html>
