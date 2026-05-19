@@ -1,469 +1,1804 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>MSTR Campaign Command Deck</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0806" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>MSTR Cycle Tool</title>
+
+<!--
+  =================================================================
+  MSTR CYCLE DECISION FRAMEWORK · v13.2 (web build)
+  =================================================================
+
+  CHANGING THE PASSWORD
+  ---------------------
+  Default password is "mstr". To change it:
+  1. Open this page in a browser.
+  2. Open DevTools (F12) and paste into the Console:
+
+       (async () => {
+         const buf = await crypto.subtle.digest(
+           'SHA-256',
+           new TextEncoder().encode('YOUR_NEW_PASSWORD')
+         );
+         console.log(Array.from(new Uint8Array(buf))
+           .map(b => b.toString(16).padStart(2, '0')).join(''));
+       })();
+
+  3. Copy the printed hex string and replace the value of
+     PASSWORD_HASH below.
+  4. Commit + push to GitHub. The new password is live.
+
+  SECURITY HONESTY
+  ----------------
+  This is a CASUAL barrier, not real authentication. Anyone who
+  opens DevTools can read PASSWORD_HASH and brute-force it offline,
+  or simply edit AUTH_REQUIRED below to false. It stops random
+  passers-by who stumble on the URL. It does not stop a determined
+  attacker. Do not paste anything genuinely sensitive into this tool.
+
+  STORAGE
+  -------
+  Trades, positions, snapshots, settings all live in this browser's
+  localStorage. They are private to your browser and do not leave
+  this device unless you explicitly use Backup → Download .json.
+  Different browsers / devices = different stores; sync them via
+  the JSON export/import flow.
+-->
+
+<script>
+  // === GATE CONFIG ============================================
+  // SHA-256 of the default password "mstr". Replace per the
+  // instructions above to change.
+  const PASSWORD_HASH = '021ab4d101785587d5ddc3e3715150393924c9df228cb6732c40da48a6cfc7c4';
+  const AUTH_REQUIRED = true;
+  const AUTH_SESSION_KEY = 'mstr:auth';
+  // ============================================================
+
+  async function sha256Hex(text) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function tryUnlock(input) {
+    const h = await sha256Hex(input);
+    return h === PASSWORD_HASH;
+  }
+</script>
+
+<style>
+  /* Browser reset + base */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #0a0806; color: #d4c8b8; -webkit-font-smoothing: antialiased; }
+  body { font-family: Georgia, "Times New Roman", serif; min-height: 100vh; min-height: 100dvh; }
+  input, button, textarea { font-family: inherit; }
+  /* Removes Safari's default ugly input styling on mobile */
+  input[type="number"] { -moz-appearance: textfield; }
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  /* Loading state before React mounts */
+  #loading { display: flex; align-items: center; justify-content: center; min-height: 100vh; min-height: 100dvh; color: #8a7a65; font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; }
+  /* Gate */
+  .gate { display: flex; align-items: center; justify-content: center; min-height: 100vh; min-height: 100dvh; padding: 24px; }
+  .gate-card { background: #14100c; border: 1px solid #2a2520; padding: 32px; max-width: 360px; width: 100%; border-radius: 3px; }
+  .gate-title { font-size: 14px; color: #d4a017; letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
+  .gate-sub { font-size: 11px; color: #8a7a65; margin-bottom: 24px; }
+  .gate-input { width: 100%; background: #0a0806; border: 1px solid #2a2520; color: #d4c8b8; padding: 10px 12px; font-size: 14px; letter-spacing: 0.05em; margin-bottom: 12px; border-radius: 2px; outline: none; }
+  .gate-input:focus { border-color: #d4a017; }
+  .gate-btn { width: 100%; background: #d4a017; color: #000; border: none; padding: 11px; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; cursor: pointer; border-radius: 2px; font-weight: 600; }
+  .gate-btn:disabled { background: #2a2520; color: #5a5048; cursor: not-allowed; }
+  .gate-err { font-size: 11px; color: #c73e1d; margin-top: 10px; min-height: 14px; }
+</style>
 </head>
-<body style="margin: 0; padding: 0; background-color: #0a0806;">
+<body>
+<div id="root"><div id="loading">Loading…</div></div>
 
-  <div id="mstr-app-root"></div>
+<!-- React via CDN, no build step required -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <script type="text/babel">
-    // 🚨 CRITICAL BROWSER-SAFE ENGINE MAPS (Prevents silent CDN Initialization Crashes)
-    const useState = React.useState;
-    const useEffect = React.useEffect;
-    const useMemo = React.useMemo;
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo } = React;
 
-    const colors = {
-      bg: '#0a0806', panel: '#14100c', border: '#2a2520',
-      text: '#d4c8b8', textDim: '#a89580', textMute: '#8a7a65', textFaint: '#5a5048',
-      gold: '#d4a017', red: '#c73e1d', green: '#2d8659', highlight: '#e8dcc8',
-    };
-    const serif = 'Georgia, "Times New Roman", serif';
+// =====================================================================
+// GATE COMPONENT
+// =====================================================================
+function Gate({ onUnlock }) {
+  const [pw, setPw] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
 
-    const t = {
-      eyebrow: { fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase', color: colors.textMute },
-      meta:    { fontSize: '11px', color: colors.textDim },
-      body:    { fontSize: '13px', color: colors.text, lineHeight: '1.55' },
-      value:   { fontSize: '15px', color: colors.text, fontWeight: 600 },
-      hero:    { fontSize: '28px', color: colors.highlight, fontWeight: 600, letterSpacing: '-0.01em' },
-    };
+  const submit = async () => {
+    if (!pw) return;
+    setBusy(true); setErr('');
+    const ok = await tryUnlock(pw);
+    setBusy(false);
+    if (ok) {
+      try { sessionStorage.setItem(AUTH_SESSION_KEY, '1'); } catch (e) {}
+      onUnlock();
+    } else {
+      setErr('Incorrect password.');
+      setPw('');
+    }
+  };
 
-    // Global client memory structure configuration
-    window.storage = {
-      get: async (key) => ({ value: localStorage.getItem(key) }),
-      set: async (key, val) => localStorage.setItem(key, val)
-    };
+  return (
+    <div className="gate">
+      <div className="gate-card">
+        <div className="gate-title">MSTR Cycle Tool</div>
+        <div className="gate-sub">Enter password to continue.</div>
+        <input
+          type="password" className="gate-input" autoFocus
+          value={pw}
+          onChange={(e) => setPw(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+          placeholder="Password"
+        />
+        <button className="gate-btn" onClick={submit} disabled={busy || !pw}>
+          {busy ? 'Checking…' : 'Unlock'}
+        </button>
+        <div className="gate-err">{err}</div>
+      </div>
+    </div>
+  );
+}
 
-    function MSTRCycleTool() {
-      // Core states
-      const [mstrPrice, setMstrPrice] = useState(164.77);
-      const [btcPrice, setBtcPrice] = useState(76900);
-      const [ma200, setMa200] = useState(229.54);
-      const [lastUpdated, setLastUpdated] = useState(null);
-      const [pasteText, setPasteText] = useState('');
-      const [pasteResult, setPasteResult] = useState(null);
+// =====================================================================
+// MAIN TOOL COMPONENT (ported from artifact)
+// =====================================================================
 
-      // Technical parameters
-      const [high20, setHigh20] = useState(197.00);
-      const [low20, setLow20] = useState(162.02);
-      const [high50, setHigh50] = useState(224.50);
-      const [low50, setLow50] = useState(135.00);
-      const [low200, setLow200] = useState(104.17);
-      const [atr14, setAtr14] = useState(13.00);
 
-      // System indicators
-      const [nupl, setNupl] = useState(28);
-      const [mvrv, setMvrv] = useState(1.4);
-      const [fundingNegative, setFundingNegative] = useState(true);
-      const [derivativesExhaustion, setDerivativesExhaustion] = useState(false);
-      const [below200ma, setBelow200ma] = useState(true);
-      const [weeklyLowerLow, setWeeklyLowerLow] = useState(false);
-      const [dxyAbove110, setDxyAbove110] = useState(false);
-      const [btcHoldings, setBtcHoldings] = useState(843738);
-      const [dilutedShares, setDilutedShares] = useState(384.1);
-      const [corporateBaseUpdated, setCorporateBaseUpdated] = useState('2026-05-18');
-      const [startingShares, setStartingShares] = useState(200);
-      const [cashBuffer, setCashBuffer] = useState(9958);  
-      const [gbpUsd, setGbpUsd] = useState(1.27);       
+function MSTRCycleTool() {
+  // ============ CORE PRICE STATE (prompt-driven) ============
+  const [mstrPrice, setMstrPrice] = useState(187);
+  const [btcPrice, setBtcPrice] = useState(80000);
+  const [ma200, setMa200] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null); // when prompt-data was last applied
+  const [pasteText, setPasteText] = useState('');
+  const [pasteResult, setPasteResult] = useState(null);
 
-      const [levelsAuto, setLevelsAuto] = useState(true);
-      const [manualSellLow, setManualSellLow] = useState(192);
-      const [manualSellHigh, setManualSellHigh] = useState(200);
-      const [manualBuyLow, setManualBuyLow] = useState(170);
-      const [manualBuyHigh, setManualBuyHigh] = useState(180);
+  // ============ TECHNICAL LEVELS (prompt-driven) ============
+  const [high20, setHigh20] = useState(null);
+  const [low20, setLow20] = useState(null);
+  const [high50, setHigh50] = useState(null);
+  const [low50, setLow50] = useState(null);
+  const [low200, setLow200] = useState(null);
+  const [atr14, setAtr14] = useState(null);
 
-      const [trades, setTrades] = useState([]);
-      const [snapshots, setSnapshots] = useState([]);
-      const [aggressionStyle, setAggressionStyle] = useState('moderate'); 
-      const [positions, setPositions] = useState([]);
-      const [positionForm, setPositionForm] = useState({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' });
-      const [exitPrices, setExitPrices] = useState({});
-      const [view, setView] = useState('dashboard');
-      const [tradeType, setTradeType] = useState('SELL');
-      const [tradeShares, setTradeShares] = useState('');
-      const [tradePrice, setTradePrice] = useState('');
-      const [tradeDate, setTradeDate] = useState(new Date().toISOString().slice(0, 10));
-      const [tradeFees, setTradeFees] = useState('');
+  // ============ STRATEGY STATE (persisted) ============
+  const [nupl, setNupl] = useState(19);
+  const [mvrv, setMvrv] = useState(1.4);
+  const [fundingNegative, setFundingNegative] = useState(false);
+  const [derivativesExhaustion, setDerivativesExhaustion] = useState(false);
+  const [below200ma, setBelow200ma] = useState(false);
+  const [weeklyLowerLow, setWeeklyLowerLow] = useState(false);
+  const [dxyAbove110, setDxyAbove110] = useState(false);
+  const [btcHoldings, setBtcHoldings] = useState(818869);
+  const [dilutedShares, setDilutedShares] = useState(280);
+  const [corporateBaseUpdated, setCorporateBaseUpdated] = useState(null);
+  const [startingShares, setStartingShares] = useState(211);
+  const [cashBuffer, setCashBuffer] = useState(0);  // GBP — uncommitted cash in SIPP
+  const [gbpUsd, setGbpUsd] = useState(1.27);       // for displaying GBP totals
 
-      useEffect(() => {
-        const load = async () => {
-          try {
-            const settings = await window.storage.get('mstr:settings');
-            if (settings?.value) {
-              const s = JSON.parse(settings.value);
-              if (s.mstrPrice !== undefined) setMstrPrice(s.mstrPrice);
-              if (s.btcPrice !== undefined) setBtcPrice(s.btcPrice);
-              if (s.ma200 !== undefined) setMa200(s.ma200);
-              if (s.lastUpdated !== undefined) setLastUpdated(s.lastUpdated);
-              if (s.high20 !== undefined) setHigh20(s.high20);
-              if (s.low20 !== undefined) setLow20(s.low20);
-              if (s.high50 !== undefined) setHigh50(s.high50);
-              if (s.low50 !== undefined) setLow50(s.low50);
-              if (s.low200 !== undefined) setLow200(s.low200);
-              if (s.atr14 !== undefined) setAtr14(s.atr14);
-              if (s.nupl !== undefined) setNupl(s.nupl);
-              if (s.mvrv !== undefined) setMvrv(s.mvrv);
-              if (s.fundingNegative !== undefined) setFundingNegative(s.fundingNegative);
-              if (s.derivativesExhaustion !== undefined) setDerivativesExhaustion(s.derivativesExhaustion);
-              if (s.below200ma !== undefined) setBelow200ma(s.below200ma);
-              if (s.weeklyLowerLow !== undefined) setWeeklyLowerLow(s.weeklyLowerLow);
-              if (s.dxyAbove110 !== undefined) setDxyAbove110(s.dxyAbove110);
-              if (s.btcHoldings !== undefined) setBtcHoldings(s.btcHoldings);
-              if (s.dilutedShares !== undefined) setDilutedShares(s.dilutedShares);
-              if (s.corporateBaseUpdated !== undefined) setCorporateBaseUpdated(s.corporateBaseUpdated);
-              if (s.startingShares !== undefined) setStartingShares(s.startingShares);
-              if (s.cashBuffer !== undefined) setCashBuffer(s.cashBuffer);
-              if (s.gbpUsd !== undefined) setGbpUsd(s.gbpUsd);
-              if (s.levelsAuto !== undefined) setLevelsAuto(s.levelsAuto);
-              if (s.manualSellLow !== undefined) setManualSellLow(s.manualSellLow);
-              if (s.manualSellHigh !== undefined) setManualSellHigh(s.manualSellHigh);
-              if (s.manualBuyLow !== undefined) setManualBuyLow(s.manualBuyLow);
-              if (s.manualBuyHigh !== undefined) setManualBuyHigh(s.manualBuyHigh);
-              if (s.aggressionStyle !== undefined) setAggressionStyle(s.aggressionStyle);
-            }
-          } catch (e) {}
-          try { const t = await window.storage.get('mstr:trades'); if (t?.value) setTrades(JSON.parse(t.value)); } catch (e) {}
-          try { const sn = await window.storage.get('mstr:snapshots'); if (sn?.value) setSnapshots(JSON.parse(sn.value)); } catch (e) {}
-          try { const pos = await window.storage.get('mstr:positions'); if (pos?.value) setPositions(JSON.parse(pos.value)); } catch (e) {}
-        };
-        load();
-      }, []);
+  // Level overrides (persisted)
+  const [levelsAuto, setLevelsAuto] = useState(true);
+  const [manualSellLow, setManualSellLow] = useState(192);
+  const [manualSellHigh, setManualSellHigh] = useState(200);
+  const [manualBuyLow, setManualBuyLow] = useState(170);
+  const [manualBuyHigh, setManualBuyHigh] = useState(180);
 
-      useEffect(() => {
-        const save = async () => {
-          try {
-            await window.storage.set('mstr:settings', JSON.stringify({
-              mstrPrice, btcPrice, ma200, lastUpdated, high20, low20, high50, low50, low200, atr14, nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma, weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares, corporateBaseUpdated, startingShares, cashBuffer, gbpUsd, levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh, aggressionStyle,
-            }));
-          } catch (e) {}
-        };
-        save();
-      }, [mstrPrice, btcPrice, ma200, lastUpdated, high20, low20, high50, low50, low200, atr14, nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma, weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares, corporateBaseUpdated, startingShares, cashBuffer, gbpUsd, levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh, aggressionStyle]);
+  // Journal/snapshots
+  const [trades, setTrades] = useState([]);
+  const [snapshots, setSnapshots] = useState([]);
 
-      const handleHoldingsChange = (v) => { setBtcHoldings(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
-      const handleSharesChange = (v) => { setDilutedShares(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
+  // ============ AGGRESSION PROFILE (persisted) ============
+  // Scales rotation sizing, band width, HOARD entry sensitivity, and DEPLOY ladder steepness.
+  const [aggressionStyle, setAggressionStyle] = useState('moderate'); // 'conservative' | 'moderate' | 'aggressive'
 
-      const btcPerShare = useMemo(() => btcHoldings / (dilutedShares * 1_000_000), [btcHoldings, dilutedShares]);
-      const fairValue = useMemo(() => btcPerShare * btcPrice, [btcPerShare, btcPrice]);
-      const mNAV = useMemo(() => fairValue > 0 ? mstrPrice / fairValue : 0, [mstrPrice, fairValue]);
+  // ============ ACTIVE POSITIONS (persisted) ============
+  // Open trades being tracked. Closing one writes a CLOSED entry to `trades`.
+  const [positions, setPositions] = useState([]);
+  const [positionForm, setPositionForm] = useState({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' });
+  // Per-position controlled inputs for the close-price field; keyed by position id.
+  const [exitPrices, setExitPrices] = useState({});
+  const [view, setView] = useState('dashboard');
+  const [tradeType, setTradeType] = useState('SELL');
+  const [tradeShares, setTradeShares] = useState('');
+  const [tradePrice, setTradePrice] = useState('');
+  const [tradeDate, setTradeDate] = useState(new Date().toISOString().slice(0, 10));
+  const [tradeFees, setTradeFees] = useState('');
+  const [promptCopied, setPromptCopied] = useState(false);
 
-      const cycleData = useMemo(() => {
-        const ath = new Date('2025-10-06'); const target = new Date('2026-10-06'); const now = new Date();
-        const totalDays = Math.round((target - ath) / 86400000); const elapsed = Math.round((now - ath) / 86400000);
-        return { totalDays, elapsed, remaining: Math.round((target - now) / 86400000), progress: Math.min(100, Math.max(0, (elapsed / totalDays) * 100)) };
-      }, [lastUpdated]);
-
-      const daysSinceBaseUpdate = useMemo(() => { if (!corporateBaseUpdated) return null; return Math.floor((new Date() - new Date(corporateBaseUpdated)) / 86400000); }, [corporateBaseUpdated, lastUpdated]);
-
-      const profile = useMemo(() => {
-        switch (aggressionStyle) {
-          case 'conservative': return { label: 'Conservative', rotationSizePctLow: 15, rotationSizePctHigh: 20, bandWidthMult: 0.55, hoardSensitivity: 1.15, deployLadderSteepness: 0.9, note: 'Wider bands, smaller rotations, quicker to HOARD.' };
-          case 'aggressive': return { label: 'Aggressive', rotationSizePctLow: 35, rotationSizePctHigh: 45, bandWidthMult: 0.28, hoardSensitivity: 0.85, deployLadderSteepness: 1.15, note: 'Tighter bands, larger rotations, holds ROTATE longer.' };
-          default: return { label: 'Moderate (Base)', rotationSizePctLow: 25, rotationSizePctHigh: 30, bandWidthMult: 0.4, hoardSensitivity: 1.0, deployLadderSteepness: 1.0, note: 'Balanced — base case per the playbook.' };
+  // ============ LOAD/PERSIST ============
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const settings = ({ value: localStorage.getItem('mstr:settings') });
+        if (settings?.value) {
+          const s = JSON.parse(settings.value);
+          if (s.mstrPrice !== undefined) setMstrPrice(s.mstrPrice);
+          if (s.btcPrice !== undefined) setBtcPrice(s.btcPrice);
+          if (s.ma200 !== undefined) setMa200(s.ma200);
+          if (s.lastUpdated !== undefined) setLastUpdated(s.lastUpdated);
+          if (s.high20 !== undefined) setHigh20(s.high20);
+          if (s.low20 !== undefined) setLow20(s.low20);
+          if (s.high50 !== undefined) setHigh50(s.high50);
+          if (s.low50 !== undefined) setLow50(s.low50);
+          if (s.low200 !== undefined) setLow200(s.low200);
+          if (s.atr14 !== undefined) setAtr14(s.atr14);
+          if (s.nupl !== undefined) setNupl(s.nupl);
+          if (s.mvrv !== undefined) setMvrv(s.mvrv);
+          if (s.fundingNegative !== undefined) setFundingNegative(s.fundingNegative);
+          if (s.derivativesExhaustion !== undefined) setDerivativesExhaustion(s.derivativesExhaustion);
+          if (s.below200ma !== undefined) setBelow200ma(s.below200ma);
+          if (s.weeklyLowerLow !== undefined) setWeeklyLowerLow(s.weeklyLowerLow);
+          if (s.dxyAbove110 !== undefined) setDxyAbove110(s.dxyAbove110);
+          if (s.btcHoldings !== undefined) setBtcHoldings(s.btcHoldings);
+          if (s.dilutedShares !== undefined) setDilutedShares(s.dilutedShares);
+          if (s.corporateBaseUpdated !== undefined) setCorporateBaseUpdated(s.corporateBaseUpdated);
+          if (s.startingShares !== undefined) setStartingShares(s.startingShares);
+          if (s.cashBuffer !== undefined) setCashBuffer(s.cashBuffer);
+          if (s.gbpUsd !== undefined) setGbpUsd(s.gbpUsd);
+          if (s.levelsAuto !== undefined) setLevelsAuto(s.levelsAuto);
+          if (s.manualSellLow !== undefined) setManualSellLow(s.manualSellLow);
+          if (s.manualSellHigh !== undefined) setManualSellHigh(s.manualSellHigh);
+          if (s.manualBuyLow !== undefined) setManualBuyLow(s.manualBuyLow);
+          if (s.manualBuyHigh !== undefined) setManualBuyHigh(s.manualBuyHigh);
+          if (s.aggressionStyle !== undefined) setAggressionStyle(s.aggressionStyle);
         }
-      }, [aggressionStyle]);
+      } catch (e) {}
+      try { const t = ({ value: localStorage.getItem('mstr:trades') }); if (t?.value) setTrades(JSON.parse(t.value)); } catch (e) {}
+      try { const sn = ({ value: localStorage.getItem('mstr:snapshots') }); if (sn?.value) setSnapshots(JSON.parse(sn.value)); } catch (e) {}
+      try { const pos = ({ value: localStorage.getItem('mstr:positions') }); if (pos?.value) setPositions(JSON.parse(pos.value)); } catch (e) {}
+    };
+    load();
+  }, []);
 
-      const technicals = useMemo(() => { if (high20 === null || low20 === null || atr14 === null) return null; return { high20, low20, high50, low50, low200, atr14 }; }, [high20, low20, high50, low50, low200, atr14]);
+  useEffect(() => {
+    const save = async () => {
+      try {
+        localStorage.setItem('mstr:settings', JSON.stringify({
+          mstrPrice, btcPrice, ma200, lastUpdated,
+          high20, low20, high50, low50, low200, atr14,
+          nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma,
+          weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares,
+          corporateBaseUpdated, startingShares, cashBuffer, gbpUsd,
+          levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh,
+          aggressionStyle,
+        }));
+      } catch (e) {}
+    };
+    save();
+  }, [mstrPrice, btcPrice, ma200, lastUpdated,
+      high20, low20, high50, low50, low200, atr14,
+      nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma,
+      weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares,
+      corporateBaseUpdated, startingShares, cashBuffer, gbpUsd,
+      levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh,
+      aggressionStyle]);
 
-      const dynamicLevels = useMemo(() => {
-        if (!technicals) return null; const { high20, low20, atr14 } = technicals; const current = mstrPrice;
-        const rotateSellTarget = Math.max(high20, current + atr14); const rotateBuyTarget = Math.min(low20, current - atr14); const bandWidth = atr14 * profile.bandWidthMult;
-        const hoardBuyAnchor = ma200 ? ma200 * 0.85 : current - atr14 * 2; const hoardBuyDeep = ma200 ? ma200 * 0.75 : current - atr14 * 3;
+  const handleHoldingsChange = (v) => { setBtcHoldings(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
+  const handleSharesChange = (v) => { setDilutedShares(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
+
+  // ============ DERIVED CALCS ============
+  const btcPerShare = useMemo(() => btcHoldings / (dilutedShares * 1_000_000), [btcHoldings, dilutedShares]);
+  const fairValue = useMemo(() => btcPerShare * btcPrice, [btcPerShare, btcPrice]);
+  const mNAV = useMemo(() => fairValue > 0 ? mstrPrice / fairValue : 0, [mstrPrice, fairValue]);
+
+  const cycleData = useMemo(() => {
+    const ath = new Date('2025-10-06');
+    const target = new Date('2026-10-06');
+    const now = new Date();
+    const totalDays = Math.round((target - ath) / 86400000);
+    const elapsed = Math.round((now - ath) / 86400000);
+    const remaining = Math.round((target - now) / 86400000);
+    const progress = Math.min(100, Math.max(0, (elapsed / totalDays) * 100));
+    return { totalDays, elapsed, remaining, progress };
+  }, [lastUpdated]);
+
+  const daysSinceBaseUpdate = useMemo(() => {
+    if (!corporateBaseUpdated) return null;
+    return Math.floor((new Date() - new Date(corporateBaseUpdated)) / 86400000);
+  }, [corporateBaseUpdated, lastUpdated]);
+
+  // ============ AGGRESSION PROFILE ============
+  // Three styles flex four levers: rotation sizing %, band width, HOARD entry sensitivity,
+  // and DEPLOY ladder steepness. Moderate is the documented base case.
+  const profile = useMemo(() => {
+    switch (aggressionStyle) {
+      case 'conservative':
         return {
-          rotate: { sellLow: rotateSellTarget - bandWidth, sellHigh: rotateSellTarget + bandWidth, buyLow: rotateBuyTarget - bandWidth, buyHigh: rotateBuyTarget + bandWidth },
-          hoard: { sellLow: current + atr14 * 0.5, sellHigh: Math.max(high20, current + atr14 * 1.5), buyTarget: current - (current - hoardBuyAnchor) / profile.hoardSensitivity, buyDeepTarget: current - (current - hoardBuyDeep) / profile.hoardSensitivity },
-          deploy: { ladder: ma200 ? [{ level: current, pct: 25 }, { level: current - (current - ma200 * 0.85) * 0.5 * profile.deployLadderSteepness, pct: 25 }, { level: current - (current - ma200 * 0.85) * profile.deployLadderSteepness, pct: 25 }, { level: current - (current - ma200 * 0.65) * profile.deployLadderSteepness, pct: 25 }] : [{ level: current, pct: 25 }, { level: current * (1 - 0.10 * profile.deployLadderSteepness), pct: 25 }, { level: current * (1 - 0.20 * profile.deployLadderSteepness), pct: 25 }, { level: current * (1 - 0.30 * profile.deployLadderSteepness), pct: 25 }] },
+          label: 'Conservative',
+          rotationSizePctLow: 15,
+          rotationSizePctHigh: 20,
+          bandWidthMult: 0.55,        // wider bands → fewer trigger fires
+          hoardSensitivity: 1.15,     // HOARD entry zone pulled closer to current (quicker to HOARD)
+          deployLadderSteepness: 0.9, // tighter ladder spacing (deploy less aggressively into the hole)
+          note: 'Wider bands, smaller rotations, quicker to HOARD.',
         };
-      }, [technicals, ma200, mstrPrice, profile]);
+      case 'aggressive':
+        return {
+          label: 'Aggressive',
+          rotationSizePctLow: 35,
+          rotationSizePctHigh: 45,
+          bandWidthMult: 0.28,        // tighter bands → more frequent trigger fires
+          hoardSensitivity: 0.85,     // HOARD entry held lower (still follows HOARD signal but holds ROTATE longer)
+          deployLadderSteepness: 1.15,// wider ladder spacing (deploy harder on the way down)
+          note: 'Tighter bands, larger rotations, holds ROTATE longer.',
+        };
+      default:
+        return {
+          label: 'Moderate (Base)',
+          rotationSizePctLow: 25,
+          rotationSizePctHigh: 30,
+          bandWidthMult: 0.4,
+          hoardSensitivity: 1.0,
+          deployLadderSteepness: 1.0,
+          note: 'Balanced — base case per the playbook.',
+        };
+    }
+  }, [aggressionStyle]);
 
-      const bearScore = useMemo(() => { let s = 0; if (btcPrice < 72500) s += 2; if (btcPrice < 60000) s += 2; if (nupl < 0) s += 2; if (mvrv < 1.0) s += 1; if (fundingNegative) s += 1; if (below200ma) s += 2; if (weeklyLowerLow) s += 1; if (dxyAbove110) s += 1; if (cycleData.remaining > 0 && cycleData.remaining < 180) s += 1; return s; }, [btcPrice, nupl, mvrv, fundingNegative, below200ma, weeklyLowerLow, dxyAbove110, cycleData]);
-      const bottomScore = useMemo(() => { let s = 0; if (mstrPrice < 120) s += 2; if (mstrPrice < 90) s += 2; if (btcPrice < 55000) s += 2; if (btcPrice < 45000) s += 2; if (nupl < -25) s += 3; if (mvrv < 0.8) s += 3; if (derivativesExhaustion) s += 2; if (Math.abs(cycleData.remaining) < 60) s += 2; return s; }, [mstrPrice, btcPrice, nupl, mvrv, derivativesExhaustion, cycleData]);
-      const mode = useMemo(() => { if (bottomScore >= 7 && mstrPrice < 140) return 'DEPLOY'; if (bearScore >= 6) return 'HOARD'; return 'ROTATE'; }, [bearScore, bottomScore, mstrPrice]);
+  // ============ DYNAMIC LEVELS ============
+  // Calculate technical levels from OHLC data
+  // Technicals come straight from prompt-driven state values
+  const technicals = useMemo(() => {
+    if (high20 === null || low20 === null || atr14 === null) return null;
+    return { high20, low20, high50, low50, low200, atr14 };
+  }, [high20, low20, high50, low50, low200, atr14]);
 
-      const currentLevels = useMemo(() => {
-        if (!levelsAuto || !dynamicLevels) return { rotate: { sell: fmtRange(manualSellLow, manualSellHigh), buy: fmtRange(manualBuyLow, manualBuyHigh) }, hoard: { sell: fmtRange(manualSellLow, manualSellHigh), buy: `Wait — target ${fmt(manualBuyLow * 0.7)}` }, deploy: { sell: 'Do not sell', buy: 'Ladder every 10% drop' } }[mode.toLowerCase()];
-        const d = dynamicLevels; return { rotate: { sell: fmtRange(d.rotate.sellLow, d.rotate.sellHigh), buy: fmtRange(d.rotate.buyLow, d.rotate.buyHigh) }, hoard: { sell: fmtRange(d.hoard.sellLow, d.hoard.sellHigh), buy: `Wait — target ${fmt(d.hoard.buyTarget)} / deep ${fmt(d.hoard.buyDeepTarget)}` }, deploy: { sell: 'Do not sell', buy: `Ladder: ${d.deploy.ladder.map(l => fmt(l.level)).join(' · ')}` } }[mode.toLowerCase()];
-      }, [levelsAuto, dynamicLevels, mode, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
+  // Mode-specific level calculation
+  // ROTATE bands compute purely from 20d range + ATR — no ma200 dependency.
+  // HOARD/DEPLOY prefer ma200-anchored targets when available, fall back to ATR-anchored
+  // estimates when it's missing so the tool stays useful in degraded data conditions.
+  // Aggression profile scales band width, HOARD sensitivity, and DEPLOY ladder steepness.
+  const dynamicLevels = useMemo(() => {
+    if (!technicals) return null;
+    const { high20, low20, atr14 } = technicals;
+    const current = mstrPrice;
 
-      const alertLevels = useMemo(() => {
-        if (!levelsAuto || !dynamicLevels) return { rotate: { sellAlert: manualSellLow, buyAlert: manualBuyHigh }, hoard: { sellAlert: manualSellLow, buyAlert: manualBuyLow * 0.7, buyDeepAlert: null }, deploy: { sellAlert: null, ladder: [] } };
-        const d = dynamicLevels; return { rotate: { sellAlert: d.rotate.sellLow, buyAlert: d.rotate.buyHigh }, hoard: { sellAlert: d.hoard.sellLow, buyAlert: d.hoard.buyTarget, buyDeepAlert: d.hoard.buyDeepTarget }, deploy: { sellAlert: null, ladder: d.deploy.ladder.map(r => r.level) } };
-      }, [levelsAuto, dynamicLevels, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
+    // ROTATE: sell at 20-day high (floored at current + 1 ATR), buy at 20-day low (floored at current - 1 ATR)
+    const rotateSellTarget = Math.max(high20, current + atr14);
+    const rotateBuyTarget = Math.min(low20, current - atr14);
+    const bandWidth = atr14 * profile.bandWidthMult;
 
-      const modeCfg = {
-        ROTATE: { label: 'NORMAL ROTATION', color: '#d4a017', bg: '#1a1611', action: 'Sell at resistance, buy back at support.', cash: '0–25%' },
-        HOARD:  { label: 'CASH HOARD',      color: '#c73e1d', bg: '#1a0f0d', action: 'Sell at resistance. Do NOT buy back. Wait for deeper levels.', cash: '40–70%' },
-        DEPLOY: { label: 'DEPLOY CASH',     color: '#2d8659', bg: '#0f1a13', action: 'Ladder cash into weakness. All-in accumulation.', cash: 'Deploying to 0%' },
+    // HOARD entry: scale by sensitivity. >1 pulls entry closer to current (quicker to engage),
+    // <1 pushes entry deeper (holds ROTATE longer before flipping).
+    const hoardBuyAnchor = ma200 ? ma200 * 0.85 : current - atr14 * 2;
+    const hoardBuyDeep = ma200 ? ma200 * 0.75 : current - atr14 * 3;
+    const hoardBuyTarget = current - (current - hoardBuyAnchor) / profile.hoardSensitivity;
+    const hoardBuyDeepTarget = current - (current - hoardBuyDeep) / profile.hoardSensitivity;
+
+    // DEPLOY ladder: steepness scales the spacing between rungs around the 200MA anchor
+    const deployRungs = ma200
+      ? [
+          { level: current, pct: 25 },
+          { level: current - (current - ma200 * 0.85) * 0.5 * profile.deployLadderSteepness, pct: 25 },
+          { level: current - (current - ma200 * 0.85) * profile.deployLadderSteepness, pct: 25 },
+          { level: current - (current - ma200 * 0.65) * profile.deployLadderSteepness, pct: 25 },
+        ]
+      : [
+          { level: current, pct: 25 },
+          { level: current * (1 - 0.10 * profile.deployLadderSteepness), pct: 25 },
+          { level: current * (1 - 0.20 * profile.deployLadderSteepness), pct: 25 },
+          { level: current * (1 - 0.30 * profile.deployLadderSteepness), pct: 25 },
+        ];
+
+    return {
+      rotate: {
+        sellLow: rotateSellTarget - bandWidth,
+        sellHigh: rotateSellTarget + bandWidth,
+        buyLow: rotateBuyTarget - bandWidth,
+        buyHigh: rotateBuyTarget + bandWidth,
+      },
+      hoard: {
+        sellLow: current + atr14 * 0.5,
+        sellHigh: Math.max(high20, current + atr14 * 1.5),
+        buyTarget: hoardBuyTarget,
+        buyDeepTarget: hoardBuyDeepTarget,
+      },
+      deploy: { ladder: deployRungs },
+    };
+  }, [technicals, ma200, mstrPrice, profile]);
+
+  // ============ SCORES + MODE ============
+  const bearScore = useMemo(() => {
+    let s = 0;
+    if (btcPrice < 72500) s += 2;
+    if (btcPrice < 60000) s += 2;
+    if (nupl < 0) s += 2;
+    if (mvrv < 1.0) s += 1;
+    if (fundingNegative) s += 1;
+    if (below200ma) s += 2;
+    if (weeklyLowerLow) s += 1;
+    if (dxyAbove110) s += 1;
+    if (cycleData.remaining > 0 && cycleData.remaining < 180) s += 1;
+    return s;
+  }, [btcPrice, nupl, mvrv, fundingNegative, below200ma, weeklyLowerLow, dxyAbove110, cycleData]);
+
+  const bottomScore = useMemo(() => {
+    let s = 0;
+    if (mstrPrice < 120) s += 2;
+    if (mstrPrice < 90) s += 2;
+    if (btcPrice < 55000) s += 2;
+    if (btcPrice < 45000) s += 2;
+    if (nupl < -25) s += 3;
+    if (mvrv < 0.8) s += 3;
+    if (derivativesExhaustion) s += 2;
+    if (Math.abs(cycleData.remaining) < 60) s += 2;
+    return s;
+  }, [mstrPrice, btcPrice, nupl, mvrv, derivativesExhaustion, cycleData]);
+
+  const mode = useMemo(() => {
+    if (bottomScore >= 7 && mstrPrice < 140) return 'DEPLOY';
+    if (bearScore >= 6) return 'HOARD';
+    return 'ROTATE';
+  }, [bearScore, bottomScore, mstrPrice]);
+
+  // ============ LEVEL DISPLAY STRINGS ============
+  const fmt = (v) => `$${Math.round(v)}`;
+  const fmtRange = (low, high) => `${fmt(low)}–${fmt(high)}`;
+
+  const levelDisplay = useMemo(() => {
+    // If manual override or no dynamic data, use manual values
+    if (!levelsAuto || !dynamicLevels) {
+      return {
+        rotate: { sell: fmtRange(manualSellLow, manualSellHigh), buy: fmtRange(manualBuyLow, manualBuyHigh) },
+        hoard: { sell: fmtRange(manualSellLow, manualSellHigh), buy: `Wait — target ${fmt(manualBuyLow * 0.7)}` },
+        deploy: { sell: 'Do not sell', buy: 'Ladder every 10% drop' },
       };
-      const cfg = modeCfg[mode];
-      const deploySuppressed = bottomScore >= 7 && mstrPrice >= 140;
+    }
+    const d = dynamicLevels;
+    return {
+      rotate: {
+        sell: fmtRange(d.rotate.sellLow, d.rotate.sellHigh),
+        buy: fmtRange(d.rotate.buyLow, d.rotate.buyHigh),
+      },
+      hoard: {
+        sell: fmtRange(d.hoard.sellLow, d.hoard.sellHigh),
+        buy: `Wait — target ${fmt(d.hoard.buyTarget)} / deep ${fmt(d.hoard.buyDeepTarget)}`,
+      },
+      deploy: {
+        sell: 'Do not sell',
+        buy: `Ladder: ${d.deploy.ladder.map(l => fmt(l.level)).join(' · ')}`,
+      },
+    };
+  }, [levelsAuto, dynamicLevels, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
 
-      const bandHits = useMemo(() => {
-        if (!dynamicLevels) return []; const hits = []; const d = dynamicLevels; const p = mstrPrice;
-        if (mode === 'ROTATE') {
-          if (p >= d.rotate.sellLow && p <= d.rotate.sellHigh) { hits.push({ tag: 'ROTATE-SELL', side: 'SELL', label: 'ROTATE sell zone hit', zone: `${fmt(d.rotate.sellLow)}–${fmt(d.rotate.sellHigh)}`, price: p }); }
-          if (p >= d.rotate.buyLow && p <= d.rotate.buyHigh) { hits.push({ tag: 'ROTATE-BUY', side: 'BUY', label: 'ROTATE buy zone hit', zone: `${fmt(d.rotate.buyLow)}–${fmt(d.rotate.buyHigh)}`, price: p }); }
-        }
-        if (mode === 'HOARD') {
-          if (p >= d.hoard.sellLow && p <= d.hoard.sellHigh) { hits.push({ tag: 'HOARD-SELL', side: 'SELL', label: 'HOARD sell zone hit', zone: `${fmt(d.hoard.sellLow)}–${fmt(d.hoard.sellHigh)}`, price: p }); }
-          const t = d.hoard.buyTarget; if (p >= t * 0.985 && p <= t * 1.015) { hits.push({ tag: 'HOARD-BUY', side: 'BUY', label: 'HOARD buy target reached', zone: fmt(t), price: p }); }
-          const dt = d.hoard.buyDeepTarget; if (p <= dt * 1.015) { hits.push({ tag: 'HOARD-BUY-DEEP', side: 'BUY', label: 'HOARD deep buy target reached', zone: fmt(dt), price: p }); }
-        }
-        if (mode === 'DEPLOY') { d.deploy.ladder.forEach((rung, i) => { if (p <= rung.level * 1.015) { hits.push({ tag: `DEPLOY-RUNG-${i + 1}`, side: 'BUY', label: `DEPLOY rung ${i + 1} live (${rung.pct}%)`, zone: fmt(rung.level), price: p }); } }); }
-        return hits;
-      }, [dynamicLevels, mstrPrice, mode]);
-
-      const priceRange = useMemo(() => {
-        if (!dynamicLevels) return null; const RED = '#c73e1d', GREEN = '#2d8659', GOLD = '#d4a017'; const p = mstrPrice; const d = dynamicLevels;
-        if (mode === 'ROTATE') {
-          const lo = d.rotate.buyLow; const hi = d.rotate.sellHigh; const span = hi - lo;
-          return { pct: span > 0 ? Math.max(0, Math.min(1, (p - lo) / span)) : 0.5, verdict: p >= d.rotate.sellLow ? 'IN SELL ZONE' : p <= d.rotate.buyHigh ? 'IN BUY ZONE' : 'BETWEEN BANDS', tone: p >= d.rotate.sellLow ? RED : p <= d.rotate.buyHigh ? GREEN : GOLD, lo, hi, buyLow: d.rotate.buyLow, buyHigh: d.rotate.buyHigh, sellLow: d.rotate.sellLow, sellHigh: d.rotate.sellHigh };
-        }
-        if (mode === 'HOARD') {
-          const target = d.hoard.buyTarget; const deep = d.hoard.buyDeepTarget; const pctToTarget = ((p / target) - 1) * 100;
-          return { pct: null, verdict: p >= d.hoard.sellLow ? 'IN SELL ZONE' : p <= target * 1.015 ? 'AT BUY TARGET' : `${pctToTarget > 0 ? '+' : ''}${pctToTarget.toFixed(1)}% vs target`, tone: p >= d.hoard.sellLow ? RED : p <= target * 1.015 ? GREEN : GOLD, target, deep, sellLow: d.hoard.sellLow, sellHigh: d.hoard.sellHigh };
-        }
-        return { pct: null, verdict: d.deploy.ladder.filter(r => p <= r.level * 1.015).length > 0 ? `${d.deploy.ladder.filter(r => p <= r.level * 1.015).length}/4 RUNGS LIVE` : 'ABOVE LADDER', tone: GREEN, ladder: d.deploy.ladder };
-      }, [dynamicLevels, mstrPrice, mode]);
-
-      const journalStats = useMemo(() => {
-        let currentShares = startingShares; let totalCash = 0; let rotationShares = 0; let completedRotations = 0; let openSell = null;
-        const sorted = [...trades].sort((a, b) => a.date.localeCompare(b.date));
-        sorted.forEach(t => {
-          const gross = t.shares * t.price;
-          if (t.type === 'SELL') { currentShares -= t.shares; totalCash += gross - (t.fees || 0); openSell = { shares: t.shares, price: t.price }; }
-          else { currentShares += t.shares; totalCash -= gross + (t.fees || 0); if (openSell) { rotationShares += (t.shares - openSell.shares); completedRotations += 1; openSell = null; } }
-        });
-        return { currentShares, totalCash, sharesDelta: currentShares - startingShares, sharesPct: startingShares > 0 ? ((currentShares - startingShares) / startingShares) * 100 : 0, rotationShares, completedRotations, tradeCount: trades.length };
-      }, [trades, startingShares]);
-
-      const portfolio = useMemo(() => {
-        const positionUSD = journalStats.currentShares * mstrPrice; const positionGBP = positionUSD / gbpUsd; const totalGBP = positionGBP + cashBuffer;
-        return { positionUSD, positionGBP, totalGBP, cashPct: totalGBP > 0 ? (cashBuffer / totalGBP) * 100 : 0, positionPct: 100 - (totalGBP > 0 ? (cashBuffer / totalGBP) * 100 : 0) };
-      }, [journalStats.currentShares, mstrPrice, gbpUsd, cashBuffer]);
-
-      const claudePrompt = `Please web-search data and return values in code block.`;
-
-      const applyPaste = () => {
-        if (!pasteText.trim()) return;
-        let text = pasteText.replace(/```[a-z]*\n?/gi, '').replace(/```/g, ''); const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-        for (const line of lines) {
-          const m = line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/); if (!m) continue;
-          const key = m[1].toUpperCase(); const val = m[2].trim(); const numVal = parseFloat(val.replace(/[$,%]/g, '')); const boolVal = /^on$|^true$|^yes$|^1$/i.test(val);
-          switch (key) {
-            case 'MSTR_PRICE': if (!isNaN(numVal)) setMstrPrice(numVal); break;
-            case 'MSTR_200MA': if (!isNaN(numVal)) setMa200(numVal); break;
-            case 'MSTR_20D_HIGH': if (!isNaN(numVal)) setHigh20(numVal); break;
-            case 'MSTR_20D_LOW': if (!isNaN(numVal)) setLow20(numVal); break;
-            case 'MSTR_50D_HIGH': if (!isNaN(numVal)) setHigh50(numVal); break;
-            case 'MSTR_50D_LOW': if (!isNaN(numVal)) setLow50(numVal); break;
-            case 'MSTR_200D_LOW': if (!isNaN(numVal)) setLow200(numVal); break;
-            case 'MSTR_ATR14': if (!isNaN(numVal)) setAtr14(numVal); break;
-            case 'BTC_PRICE': if (!isNaN(numVal)) setBtcPrice(numVal); break;
-            case 'NUPL': if (!isNaN(numVal)) setNupl(numVal); break;
-            case 'MVRV': if (!isNaN(numVal)) setMvrv(numVal); break;
-            case 'BTC_HOLDINGS': if (!isNaN(numVal)) handleHoldingsChange(numVal); break;
-            case 'DILUTED_SHARES': if (!isNaN(numVal)) { const shares = numVal > 10000 ? numVal / 1000000 : numVal; handleSharesChange(shares); } break;
-            case 'BELOW_200MA': setBelow200ma(boolVal); break;
-            case 'WEEKLY_LL': setWeeklyLowerLow(boolVal); break;
-            case 'SHORTING': setFundingNegative(boolVal); break;
-            case 'EXHAUSTION': setDerivativesExhaustion(boolVal); break;
-            case 'DXY_ABOVE_110': setDxyAbove110(boolVal); break;
-          }
-        }
-        setLastUpdated(new Date().toISOString().slice(0, 10)); setPasteText('');
+  // ============ ALERT LEVELS ============
+  // Single-figure alert prices for setting Yahoo Finance (or similar) price alerts.
+  // ROTATE uses inner-edge: sellLow (price entering sell zone) and buyHigh (price entering buy zone)
+  // so you get the earliest possible notification with maximum reaction time. HOARD/DEPLOY are
+  // already single-number anchors (buyTarget, ladder rungs) so they pass through unchanged.
+  // Returns either a number or null per slot — null means "no single alert level makes sense here".
+  const alertLevels = useMemo(() => {
+    // Manual mode: derive inner-edge from the manual sliders
+    if (!levelsAuto || !dynamicLevels) {
+      return {
+        rotate: { sellAlert: manualSellLow, buyAlert: manualBuyHigh },
+        hoard:  { sellAlert: manualSellLow, buyAlert: manualBuyLow * 0.7, buyDeepAlert: null },
+        deploy: { sellAlert: null, ladder: [] },
       };
+    }
+    const d = dynamicLevels;
+    return {
+      rotate: {
+        sellAlert: d.rotate.sellLow,   // inner edge of sell band — alert when price enters it
+        buyAlert:  d.rotate.buyHigh,    // inner edge of buy band — alert when price enters it
+      },
+      hoard: {
+        sellAlert:     d.hoard.sellLow,
+        buyAlert:      d.hoard.buyTarget,       // already a single number
+        buyDeepAlert:  d.hoard.buyDeepTarget,   // already a single number
+      },
+      deploy: {
+        sellAlert: null,
+        ladder: d.deploy.ladder.map(r => r.level),
+      },
+    };
+  }, [levelsAuto, dynamicLevels, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
 
-      const saveSnapshot = () => { setSnapshots([...snapshots, { date: new Date().toISOString(), mstrPrice, btcPrice, nupl, mvrv, mNAV: Number(mNAV.toFixed(2)), bearScore, bottomScore, mode }]); };
-      const addTrade = () => { if (!tradeShares || !tradePrice) return; setTrades([...trades, { id: Date.now(), date: tradeDate, type: tradeType, shares: parseFloat(tradeShares), price: parseFloat(tradePrice), fees: parseFloat(tradeFees) || 0 }]); setTradeShares(''); setTradePrice(''); };
-      const openPosition = () => { if (!positionForm.shares || !positionForm.entryPrice) return; setPositions([...positions, { id: Date.now(), openedAt: new Date().toISOString(), shares: parseFloat(positionForm.shares), entryPrice: parseFloat(positionForm.entryPrice), stop: positionForm.stop ? parseFloat(positionForm.stop) : null, target: positionForm.target ? parseFloat(positionForm.target) : null, tag: positionForm.tag || 'MANUAL', notes: positionForm.notes || '', status: 'OPEN' }]); setPositionForm({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' }); };
-      const closePosition = (id, exitPrice) => { const pos = positions.find(p => p.id === id); if (!pos) return; setPositions(positions.map(p => p.id === id ? { ...p, status: 'CLOSED', closedAt: new Date().toISOString(), exitPrice: parseFloat(exitPrice) } : p)); setTrades([...trades, { id: Date.now(), date: new Date().toISOString().slice(0, 10), type: 'SELL', shares: pos.shares, price: parseFloat(exitPrice), fees: 0, fromPositionId: id }]); };
-      const deleteTrade = (id) => setTrades(trades.filter(t => t.id !== id));
-      const deletePosition = (id) => setPositions(positions.filter(p => p.id !== id));
-      const deleteSnapshot = (date) => setSnapshots(snapshots.filter(s => s.date !== date));
+  const modeCfg = {
+    ROTATE: { label: 'NORMAL ROTATION', color: '#d4a017', bg: '#1a1611', action: 'Sell at resistance, buy back at support.', cash: '0–25%' },
+    HOARD:  { label: 'CASH HOARD',      color: '#c73e1d', bg: '#1a0f0d', action: 'Sell at resistance. Do NOT buy back. Wait for deeper levels.', cash: '40–70%' },
+    DEPLOY: { label: 'DEPLOY CASH',     color: '#2d8659', bg: '#0f1a13', action: 'Ladder cash into weakness. All-in accumulation.', cash: 'Deploying to 0%' },
+  };
+  const cfg = modeCfg[mode];
+  const currentLevels = levelDisplay[mode.toLowerCase()];
+  const deploySuppressed = bottomScore >= 7 && mstrPrice >= 140;
 
-      const NavButton = ({ id, label, secondary }) => (
-        <button onClick={() => setView(id)} style={{
-          background: view === id ? colors.panel : 'transparent', color: view === id ? colors.gold : (secondary ? colors.textMute : colors.textDim),
-          border: `1px solid ${view === id ? colors.gold : colors.border}`, padding: secondary ? '5px 10px' : '8px 14px', fontFamily: serif, fontSize: secondary ? '10px' : '11px',
-          letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', flex: 1, fontWeight: view === id ? 600 : 400, borderRadius: '2px'
-        }}>{label}</button>
-      );
+  // ============ BAND-HIT DETECTION ============
+  // Returns an array of currently-triggered bands relative to mstrPrice and the active mode.
+  // Each hit is { tag, side, label, zone, price } so the UI can render chips and prefill the form.
+  const bandHits = useMemo(() => {
+    if (!dynamicLevels) return [];
+    const hits = [];
+    const d = dynamicLevels;
+    const p = mstrPrice;
+    // ROTATE bands: live in ROTATE mode
+    if (mode === 'ROTATE') {
+      if (p >= d.rotate.sellLow && p <= d.rotate.sellHigh) {
+        hits.push({ tag: 'ROTATE-SELL', side: 'SELL', label: 'ROTATE sell zone hit', zone: `${fmt(d.rotate.sellLow)}–${fmt(d.rotate.sellHigh)}`, price: p });
+      }
+      if (p >= d.rotate.buyLow && p <= d.rotate.buyHigh) {
+        hits.push({ tag: 'ROTATE-BUY', side: 'BUY', label: 'ROTATE buy zone hit', zone: `${fmt(d.rotate.buyLow)}–${fmt(d.rotate.buyHigh)}`, price: p });
+      }
+    }
+    // HOARD bands: sell live, buy target tracked but flagged only when in range
+    if (mode === 'HOARD') {
+      if (p >= d.hoard.sellLow && p <= d.hoard.sellHigh) {
+        hits.push({ tag: 'HOARD-SELL', side: 'SELL', label: 'HOARD sell zone hit', zone: `${fmt(d.hoard.sellLow)}–${fmt(d.hoard.sellHigh)}`, price: p });
+      }
+      // Treat buyTarget as a ±1.5% trigger window
+      const t = d.hoard.buyTarget;
+      if (p >= t * 0.985 && p <= t * 1.015) {
+        hits.push({ tag: 'HOARD-BUY', side: 'BUY', label: 'HOARD buy target reached', zone: fmt(t), price: p });
+      }
+      const dt = d.hoard.buyDeepTarget;
+      if (p <= dt * 1.015) {
+        hits.push({ tag: 'HOARD-BUY-DEEP', side: 'BUY', label: 'HOARD deep buy target reached', zone: fmt(dt), price: p });
+      }
+    }
+    // DEPLOY ladder: every rung at-or-below current price is "live"
+    if (mode === 'DEPLOY') {
+      d.deploy.ladder.forEach((rung, i) => {
+        if (p <= rung.level * 1.015) {
+          hits.push({ tag: `DEPLOY-RUNG-${i + 1}`, side: 'BUY', label: `DEPLOY rung ${i + 1} live (${rung.pct}%)`, zone: fmt(rung.level), price: p });
+        }
+      });
+    }
+    return hits;
+  }, [dynamicLevels, mstrPrice, mode]);
 
-      const staleColor = !daysSinceBaseUpdate && daysSinceBaseUpdate !== 0 ? colors.textFaint : daysSinceBaseUpdate > 60 ? colors.red : daysSinceBaseUpdate > 30 ? colors.gold : colors.textMute;
+  // ============ PRICE-IN-RANGE (hero derivation) ============
+  // Surfaces the most important question this tool answers: where is MSTR right now
+  // relative to my action zones? Returns a 0-1 position, a status verdict, and a colour cue.
+  // In ROTATE: 0 = at buyLow, 1 = at sellHigh.
+  // In HOARD: focuses on distance-to-buy-target (or how far above sell zone).
+  // In DEPLOY: focuses on which ladder rung is currently live.
+  // Hex values inlined here (rather than reading from the `colors` object below) because
+  // this memo runs before `colors` is declared — referencing it would hit a TDZ error.
+  const priceRange = useMemo(() => {
+    if (!dynamicLevels) return null;
+    const RED = '#c73e1d', GREEN = '#2d8659', GOLD = '#d4a017';
+    const p = mstrPrice;
+    const d = dynamicLevels;
 
-      return (
-        <div style={{ minHeight: '100vh', background: `linear-gradient(180deg, ${colors.bg} 0%, ${colors.panel} 100%)`, padding: '24px 16px', fontFamily: serif, color: colors.text }}>
-          <div style={{ maxWidth: '720px', margin: '0 auto' }}>
-            <div style={{ marginBottom: '24px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '20px' }}>
-              <div style={t.eyebrow}>Cycle Decision Framework · v13.2</div>
-              <h1 style={{ fontSize: '26px', color: colors.highlight, margin: '8px 0 0 0', fontStyle: 'italic', fontWeight: 400 }}>MSTR Rotation</h1>
-              <div style={{ display: 'flex', gap: '20px', fontSize: '12px', marginTop: '12px', flexWrap: 'wrap' }}>
-                <div><span style={{color:colors.textMute}}>BTC </span><span style={{color:colors.gold}}>${btcPrice.toLocaleString()}</span></div>
-                <div><span style={{color:colors.textMute}}>MSTR </span><span style={{color:colors.gold}}>${mstrPrice.toFixed(2)}</span></div>
-                <div><span style={{color:colors.textMute}}>200MA </span><span style={{color:colors.gold}}>{ma200 ? `$${ma200.toFixed(2)}` : '—'}</span></div>
-                <div><span style={{color:colors.textMute}}>mNAV </span><span style={{color:colors.gold}}>{mNAV.toFixed(2)}x</span></div>
-              </div>
-            </div>
+    if (mode === 'ROTATE') {
+      const lo = d.rotate.buyLow;
+      const hi = d.rotate.sellHigh;
+      const span = hi - lo;
+      const pct = span > 0 ? Math.max(0, Math.min(1, (p - lo) / span)) : 0.5;
+      const inSell = p >= d.rotate.sellLow;
+      const inBuy = p <= d.rotate.buyHigh;
+      const verdict = inSell ? 'IN SELL ZONE' : inBuy ? 'IN BUY ZONE' : 'BETWEEN BANDS';
+      const tone = inSell ? RED : inBuy ? GREEN : GOLD;
+      return { pct, verdict, tone, lo, hi, buyLow: d.rotate.buyLow, buyHigh: d.rotate.buyHigh, sellLow: d.rotate.sellLow, sellHigh: d.rotate.sellHigh };
+    }
+    if (mode === 'HOARD') {
+      const target = d.hoard.buyTarget;
+      const deep = d.hoard.buyDeepTarget;
+      const pctToTarget = ((p / target) - 1) * 100;   // positive = above target
+      const inSell = p >= d.hoard.sellLow;
+      const atTarget = p <= target * 1.015;
+      const verdict = inSell ? 'IN SELL ZONE' : atTarget ? 'AT BUY TARGET' : `${pctToTarget > 0 ? '+' : ''}${pctToTarget.toFixed(1)}% vs target`;
+      const tone = inSell ? RED : atTarget ? GREEN : GOLD;
+      return { pct: null, verdict, tone, target, deep, sellLow: d.hoard.sellLow, sellHigh: d.hoard.sellHigh };
+    }
+    // DEPLOY
+    const liveRungs = d.deploy.ladder.filter(r => p <= r.level * 1.015);
+    const verdict = liveRungs.length > 0 ? `${liveRungs.length}/4 RUNGS LIVE` : 'ABOVE LADDER';
+    return { pct: null, verdict, tone: GREEN, ladder: d.deploy.ladder };
+  }, [dynamicLevels, mstrPrice, mode]);
 
-            <div style={{ marginBottom: '20px' }}>
-              <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
-                <NavButton id="dashboard" label="Dashboard" />
-                <NavButton id="positions" label={`Open · ${positions.filter(p=>p.status==='OPEN').length}`} />
-                <NavButton id="journal" label={`Journal · ${trades.length}`} />
-              </div>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <NavButton id="snapshots" label={`Log · ${snapshots.length}`} secondary />
-                <NavButton id="backup" label="Backup" secondary />
-              </div>
-            </div>
+  const journalStats = useMemo(() => {
+    let currentShares = startingShares;
+    let totalCash = 0;
+    let rotationShares = 0;       // cumulative shares gained via SELL → BUY rotations
+    let completedRotations = 0;   // number of completed pairs
+    let openSell = null;          // most recent unmatched SELL
 
-            {view === 'dashboard' && (
-              <>
-                <div style={{ background: cfg.bg, border: `1px solid ${cfg.color}`, padding: '20px', borderRadius: '4px', marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', gap: '16px', flexWrap: 'wrap' }}>
-                    <div>
-                      <div style={{ ...t.eyebrow, color: cfg.color }}>Active mode</div>
-                      <div style={{ fontSize: '20px', color: cfg.color, fontWeight: 600, marginTop: '4px' }}>{cfg.label}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={t.eyebrow}>MSTR Close</div>
-                      <div style={{ ...t.hero, color: priceRange?.tone || colors.highlight }}>${mstrPrice.toFixed(2)}</div>
-                      {priceRange?.verdict && <div style={{ ...t.eyebrow, color: priceRange.tone, marginTop: '4px', fontWeight: 600 }}>{priceRange.verdict}</div>}
-                    </div>
-                  </div>
+    const sorted = [...trades].sort((a, b) => a.date.localeCompare(b.date));
 
-                  {priceRange?.pct !== null && mode === 'ROTATE' && (
-                    <div style={{ marginBottom: '18px' }}>
-                      <div style={{ position: 'relative', height: '6px', background: '#0a0806', borderRadius: '3px', border: `1px solid ${colors.border}` }}>
-                        <div style={{ position: 'absolute', left: `${priceRange.pct * 100}%`, top: '-3px', width: '2px', height: '12px', background: priceRange.tone }} />
-                      </div>
-                    </div>
-                  )}
+    sorted.forEach(t => {
+      const gross = t.shares * t.price;
+      if (t.type === 'SELL') {
+        currentShares -= t.shares;
+        totalCash += gross - (t.fees || 0);
+        // Track the SELL as potentially the start of a rotation pair
+        openSell = { shares: t.shares, price: t.price };
+      } else {
+        // BUY
+        currentShares += t.shares;
+        totalCash -= gross + (t.fees || 0);
+        // If we have an open SELL, the BUY completes a rotation
+        if (openSell) {
+          // Shares gained = buy_shares - sell_shares (the rotation accumulation)
+          const gained = t.shares - openSell.shares;
+          rotationShares += gained;
+          completedRotations += 1;
+          openSell = null;
+        }
+      }
+    });
 
-                  <div style={{ ...t.body, marginBottom: '18px' }}>{cfg.action}</div>
+    return {
+      currentShares,
+      totalCash,
+      sharesDelta: currentShares - startingShares,
+      sharesPct: startingShares > 0 ? ((currentShares - startingShares) / startingShares) * 100 : 0,
+      rotationShares,
+      completedRotations,
+      tradeCount: trades.length,
+    };
+  }, [trades, startingShares]);
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', paddingTop: '16px', borderTop: `1px solid ${colors.border}` }}>
-                    <div>
-                      <div style={t.eyebrow}>Sell zone</div>
-                      <div style={t.value}>{currentLevels.sell}</div>
-                      {alertLevels[mode.toLowerCase()]?.sellAlert && <div style={{ ...t.eyebrow, color: colors.gold, marginTop: '4px' }}>Alert ${alertLevels[mode.toLowerCase()].sellAlert.toFixed(2)}</div>}
-                    </div>
-                    <div>
-                      <div style={t.eyebrow}>Buy zone</div>
-                      <div style={t.value}>{currentLevels.buy}</div>
-                      {mode === 'ROTATE' && alertLevels.rotate?.buyAlert && <div style={{ ...t.eyebrow, color: colors.gold, marginTop: '4px' }}>Alert ${alertLevels.rotate.buyAlert.toFixed(2)}</div>}
-                      {mode === 'HOARD' && alertLevels.hoard?.buyAlert && <div style={{ ...t.eyebrow, color: colors.gold, marginTop: '4px' }}>Alert ${alertLevels.hoard.buyAlert.toFixed(2)}</div>}
-                    </div>
-                    <div>
-                      <div style={t.eyebrow}>Cash hold</div>
-                      <div style={t.value}>{cfg.cash}</div>
-                    </div>
-                  </div>
+  // Portfolio summary: shares value + uncommitted cash buffer (GBP)
+  const portfolio = useMemo(() => {
+    const positionUSD = journalStats.currentShares * mstrPrice;
+    const positionGBP = positionUSD / gbpUsd;
+    const totalGBP = positionGBP + cashBuffer;
+    const cashPct = totalGBP > 0 ? (cashBuffer / totalGBP) * 100 : 0;
+    const positionPct = 100 - cashPct;
+    return { positionUSD, positionGBP, totalGBP, cashPct, positionPct };
+  }, [journalStats.currentShares, mstrPrice, gbpUsd, cashBuffer]);
 
-                  <div style={{ marginTop: '20px', paddingTop: '14px', borderTop: `1px solid ${colors.border}` }}>
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {['conservative', 'moderate', 'aggressive'].map(s => (
-                        <button key={s} onClick={() => setAggressionStyle(s)} style={{ background: aggressionStyle === s ? cfg.color : 'transparent', color: aggressionStyle === s ? '#000' : colors.textDim, border: `1px solid ${colors.border}`, padding: '4px 8px', fontSize: '10px', textTransform: 'uppercase', cursor: 'pointer', borderRadius: '2px' }}>{s.slice(0,3)}</button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+  const claudePrompt = `Please web-search current data and return MSTR / BTC readings in the EXACT machine-readable format below. I will paste your response directly into a decision tool.
 
-                <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
-                  <div style={t.value}>System Data Payload Upload</div>
-                  <textarea value={pasteText} onChange={(e)=>setPasteText(e.target.value)} placeholder="Paste machine readout text block straight into here..." style={{ width: '100%', height: '100px', background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, marginTop: '8px', padding: '10px', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: '11px' }} />
-                  <button onClick={applyPaste} style={{ width: '100%', padding: '12px', background: colors.green, color: '#fff', border: 'none', fontWeight: 600, marginTop: '8px', cursor: 'pointer', letterSpacing: '0.05em' }}>APPLY TELEMETRY ARRAY</button>
-                </div>
-              </>
-            )}
+Search for: latest MSTR closing price; MSTR 200-day simple moving average value; MSTR daily high/low for last 20, 50, and 200 trading days; MSTR 14-day Average True Range; current Bitcoin spot price; BTC NUPL (Net Unrealised Profit/Loss) percentage; BTC MVRV ratio; BTC perpetual futures funding rates and open interest trend across major exchanges; current DXY level; Strategy Inc (MSTR) latest disclosed BTC holdings from most recent 8-K filing; Strategy diluted share count from most recent 10-Q.
 
-            {view === 'positions' && (
-              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
-                <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '16px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '8px', fontFamily: serif }}>◆ Active Order Position Book</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
-                  <input type="number" placeholder="Shares" value={positionForm.shares} onChange={(e)=>setPositionForm({...positionForm, shares:e.target.value})} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px', fontFamily: serif }} />
-                  <input type="number" placeholder="Entry Price" value={positionForm.entryPrice} onChange={(e)=>setPositionForm({...positionForm, entryPrice:e.target.value})} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px', fontFamily: serif }} />
-                </div>
-                <button onClick={openPosition} style={{ width: '100%', padding: '12px', background: colors.gold, color: '#0a0806', border: 'none', fontWeight: 600, cursor: 'pointer' }}>INITIALIZE POSITION RECORD</button>
-                
-                <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {positions.map(p => p.status === 'OPEN' && (
-                    <div key={p.id} style={{ padding: '12px', background: colors.bg, border: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={t.body}>{p.shares} sh @ ${p.entryPrice.toFixed(2)} <span style={{fontSize:'10px', color:colors.textMute}}>({p.tag})</span></div>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <input type="number" placeholder="Exit Price" value={exitPrices[p.id] ?? ''} onChange={(e)=>setExitPrices({...exitPrices, [p.id]: e.target.value})} style={{ width: '80px', background: colors.panel, color: colors.text, border: `1px solid ${colors.border}`, padding: '4px' }} />
-                        <button onClick={()=> { const v = exitPrices[p.id]; if(v) { closePosition(p.id, v); } else { closePosition(p.id, mstrPrice); } }} style={{ background: colors.red, color: '#fff', border: 'none', padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>CLOSE</button>
-                        <button onClick={()=>deletePosition(p.id)} style={{ background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMute, padding: '4px', cursor: 'pointer' }}>✕</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+Return your response as a single fenced code block containing the keys below, one per line, no commentary INSIDE the block. Outside the block you may add brief context or caveats.
 
-            {view === 'journal' && (
-              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
-                <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '16px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '8px', fontFamily: serif }}>◆ Trade Execution Journal</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
-                  <input type="number" placeholder="Shares" value={tradeShares} onChange={(e)=>setTradeShares(e.target.value)} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px' }} />
-                  <input type="number" placeholder="Price" value={tradePrice} onChange={(e)=>setTradePrice(e.target.value)} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px' }} />
-                </div>
-                <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
-                  <button onClick={()=>setTradeType('BUY')} style={{ flex: 1, padding: '10px', background: tradeType === 'BUY' ? colors.green : 'transparent', color: '#fff', border: `1px solid ${colors.green}` }}>BUY</button>
-                  <button onClick={()=>setTradeType('SELL')} style={{ flex: 1, padding: '10px', background: tradeType === 'SELL' ? colors.red : 'transparent', color: '#fff', border: `1px solid ${colors.red}` }}>SELL</button>
-                </div>
-                <button onClick={addTrade} style={{ width: '100%', padding: '12px', background: colors.gold, color: '#000', border: 'none', fontWeight: 600 }}>LOG DIRECT JOURNAL TRANSACTION</button>
+\`\`\`
+MSTR_PRICE: <number, current close in USD>
+MSTR_200MA: <number, 200-day simple moving average in USD>
+MSTR_20D_HIGH: <number, highest daily high over last 20 trading days>
+MSTR_20D_LOW: <number, lowest daily low over last 20 trading days>
+MSTR_50D_HIGH: <number, highest daily high over last 50 trading days>
+MSTR_50D_LOW: <number, lowest daily low over last 50 trading days>
+MSTR_200D_LOW: <number, lowest daily low over last 200 trading days>
+MSTR_ATR14: <number, 14-day Average True Range in USD>
+BTC_PRICE: <number, current USD spot>
+NUPL: <number, percent without %, e.g., 28 for 28%>
+MVRV: <number with one decimal, e.g., 1.4>
+BTC_HOLDINGS: <integer, total BTC held by Strategy>
+DILUTED_SHARES: <number in millions, e.g., 333>
+BELOW_200MA: ON or OFF
+WEEKLY_LL: ON or OFF
+SHORTING: ON or OFF
+EXHAUSTION: ON or OFF
+DXY_ABOVE_110: ON or OFF
+\`\`\`
 
-                <div style={{ marginTop: '20px' }}>
-                  {[...trades].reverse().map(t => (
-                    <div key={t.id} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                      <span style={{ color: t.type === 'SELL' ? colors.red : colors.green, fontWeight: 600 }}>{t.type}</span>
-                      <span>{t.shares} sh</span>
-                      <span style={{ color: colors.gold }}>${t.price}</span>
-                      <button onClick={()=>deleteTrade(t.id)} style={{ background: 'transparent', border: 'none', color: colors.textFaint, cursor: 'pointer' }}>✕</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+Rules:
+- All numeric values: digits and one decimal point only. No $ signs, no commas, no percent signs.
+- DILUTED_SHARES: in millions (e.g., 333 not 333000000).
+- BELOW_200MA: ON if MSTR closing price is below the 200-day SMA on the most recent weekly close.
+- WEEKLY_LL: ON if MSTR has printed a weekly lower-low after a weekly lower-high (confirmed downtrend structure).
+- SHORTING and EXHAUSTION are MUTUALLY EXCLUSIVE — at most one ON.
+- SHORTING: ON only if BTC perp funding is persistently and aggressively negative across major exchanges (binance, bybit, okx).
+- EXHAUSTION: ON only if funding is flat-to-neutral (~0.00%) AND aggregate open interest has collapsed to multi-month lows.
+- DXY_ABOVE_110: ON if US Dollar Index is currently above 110.
 
-            {view === 'snapshots' && (
-              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
-                <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '16px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '8px', fontFamily: serif }}>◆ System Evolution Log</div>
-                {[...snapshots].reverse().map((s, idx) => (
-                  <div key={idx} style={{ padding: '10px 0', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                    <span style={{ color: colors.textDim }}>{s.date}</span>
-                    <span style={{ fontWeight: 600, color: colors.gold }}>{s.mode}</span>
-                    <span>MSTR: ${s.mstrPrice}</span>
-                    <span>mNAV: {s.mNAV}x</span>
-                    <button onClick={()=>deleteSnapshot(s.date)} style={{ background: 'transparent', border: 'none', color: colors.textFaint, cursor: 'pointer' }}>✕</button>
-                  </div>
-                ))}
-              </div>
-            )}
+If any value cannot be reliably sourced (e.g., specific 50-day low requires chart access), provide your best estimate and add a brief note OUTSIDE the code block flagging which fields are estimates vs verified.
 
-            {view === 'backup' && (
-              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
-                <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '16px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '8px', fontFamily: serif }}>◆ Portable Sovereign State Ledger</div>
-                <button onClick={exportJSON} style={{ width: '100%', padding: '12px', background: colors.gold, color: '#000', border: 'none', fontWeight: 600, cursor: 'pointer' }}>EXPORT COMPACT SYSTEM TO CLIPBOARD</button>
-                <textarea value={importText} onChange={(e)=>setImportText(e.target.value)} placeholder="Paste your exported configuration string here..." style={{ width: '100%', height: '120px', background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, marginTop: '16px', padding: '10px', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: '10px' }} />
-                <button onClick={importJSON} style={{ width: '100%', padding: '12px', background: colors.green, color: '#fff', border: 'none', marginTop: '8px', fontWeight: 600, cursor: 'pointer' }}>RESTORE IMPORT VECTOR</button>
-              </div>
-            )}
-          </div>
-        </div>
-      );
+After the code block, briefly note: (1) any data older than a week, (2) any fields you had to estimate, (3) anything else worth flagging for the user.`;
+
+  const copyPrompt = async () => {
+    try { await navigator.clipboard.writeText(claudePrompt); setPromptCopied(true); setTimeout(() => setPromptCopied(false), 2000); } catch (e) {}
+  };
+
+  // Paste-and-parse: extract structured keys from Claude's response and apply to fields
+  const applyPaste = () => {
+    if (!pasteText.trim()) { setPasteResult({ ok: false, msg: 'Empty paste' }); return; }
+    // Strip code fences if present
+    let text = pasteText.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const applied = [];
+    const skipped = [];
+
+    for (const line of lines) {
+      // Keys may contain digits (MSTR_200MA, MSTR_20D_HIGH, MSTR_ATR14, DXY_ABOVE_110).
+      // Match against case-insensitive alphanumeric + underscore; normalise via toUpperCase below.
+      const m = line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/);
+      if (!m) continue;
+      const key = m[1].toUpperCase();
+      const val = m[2].trim();
+      const numVal = parseFloat(val.replace(/[$,%]/g, ''));
+      const boolVal = /^on$|^true$|^yes$|^1$/i.test(val);
+
+      switch (key) {
+        case 'MSTR_PRICE':
+          if (!isNaN(numVal) && numVal > 0) { setMstrPrice(numVal); applied.push(`MSTR $${numVal}`); }
+          else skipped.push(key);
+          break;
+        case 'MSTR_200MA':
+          if (!isNaN(numVal) && numVal > 0) { setMa200(numVal); applied.push(`200MA $${numVal}`); }
+          else skipped.push(key);
+          break;
+        case 'MSTR_20D_HIGH':
+          if (!isNaN(numVal) && numVal > 0) { setHigh20(numVal); applied.push(`20dH $${numVal}`); }
+          else skipped.push(key);
+          break;
+        case 'MSTR_20D_LOW':
+          if (!isNaN(numVal) && numVal > 0) { setLow20(numVal); applied.push(`20dL $${numVal}`); }
+          else skipped.push(key);
+          break;
+        case 'MSTR_50D_HIGH':
+          if (!isNaN(numVal) && numVal > 0) { setHigh50(numVal); applied.push(`50dH $${numVal}`); }
+          else skipped.push(key);
+          break;
+        case 'MSTR_50D_LOW':
+          if (!isNaN(numVal) && numVal > 0) { setLow50(numVal); applied.push(`50dL $${numVal}`); }
+          else skipped.push(key);
+          break;
+        case 'MSTR_200D_LOW':
+          if (!isNaN(numVal) && numVal > 0) { setLow200(numVal); applied.push(`200dL $${numVal}`); }
+          else skipped.push(key);
+          break;
+        case 'MSTR_ATR14':
+          if (!isNaN(numVal) && numVal > 0) { setAtr14(numVal); applied.push(`ATR ${numVal}`); }
+          else skipped.push(key);
+          break;
+        case 'BTC_PRICE':
+          if (!isNaN(numVal) && numVal > 0) { setBtcPrice(numVal); applied.push(`BTC $${numVal.toLocaleString()}`); }
+          else skipped.push(key);
+          break;
+        case 'NUPL':
+          if (!isNaN(numVal)) { setNupl(numVal); applied.push(`NUPL ${numVal}%`); }
+          else skipped.push(key);
+          break;
+        case 'MVRV':
+          if (!isNaN(numVal) && numVal > 0) { setMvrv(numVal); applied.push(`MVRV ${numVal}`); }
+          else skipped.push(key);
+          break;
+        case 'BTC_HOLDINGS':
+          if (!isNaN(numVal) && numVal > 0) { handleHoldingsChange(numVal); applied.push(`Holdings ${numVal.toLocaleString()}`); }
+          else skipped.push(key);
+          break;
+        case 'DILUTED_SHARES':
+          if (!isNaN(numVal) && numVal > 0) {
+            const shares = numVal > 10000 ? numVal / 1_000_000 : numVal;
+            handleSharesChange(shares); applied.push(`Shares ${shares}M`);
+          } else skipped.push(key);
+          break;
+        case 'BELOW_200MA':
+          setBelow200ma(boolVal); applied.push(`200MA ${boolVal ? 'ON' : 'OFF'}`);
+          break;
+        case 'WEEKLY_LL':
+          setWeeklyLowerLow(boolVal); applied.push(`WeeklyLL ${boolVal ? 'ON' : 'OFF'}`);
+          break;
+        case 'SHORTING':
+          setFundingNegative(boolVal);
+          if (boolVal) setDerivativesExhaustion(false);
+          applied.push(`Shorting ${boolVal ? 'ON' : 'OFF'}`);
+          break;
+        case 'EXHAUSTION':
+          setDerivativesExhaustion(boolVal);
+          if (boolVal) setFundingNegative(false);
+          applied.push(`Exhaustion ${boolVal ? 'ON' : 'OFF'}`);
+          break;
+        case 'DXY_ABOVE_110':
+          setDxyAbove110(boolVal); applied.push(`DXY>110 ${boolVal ? 'ON' : 'OFF'}`);
+          break;
+        default:
+          skipped.push(key);
+      }
     }
 
-    // 🚨 STABLE REACT 18 INJECTION ROOT TRIGGER
-    const root = ReactDOM.createRoot(document.getElementById('mstr-app-root'));
-    root.render(React.createElement(MSTRCycleTool));
-  </script>
+    if (applied.length === 0) {
+      setPasteResult({ ok: false, msg: 'No recognised fields. Check format — expect KEY: VALUE per line.' });
+    } else {
+      setLastUpdated(new Date().toISOString().slice(0, 10));
+      setPasteResult({
+        ok: true,
+        msg: `Applied ${applied.length} field${applied.length > 1 ? 's' : ''}${skipped.length ? ` (${skipped.length} skipped)` : ''}: ${applied.slice(0, 6).join(' · ')}${applied.length > 6 ? '…' : ''}`,
+      });
+      setPasteText('');
+      setTimeout(() => setPasteResult(null), 6000);
+    }
+  };
+
+  const saveSnapshot = async () => {
+    const snap = { date: new Date().toISOString(), mstrPrice, btcPrice, nupl, mvrv, mNAV: Number(mNAV.toFixed(2)), bearScore, bottomScore, mode };
+    const updated = [...snapshots, snap];
+    setSnapshots(updated);
+    try { localStorage.setItem('mstr:snapshots', JSON.stringify(updated)); } catch (e) {}
+  };
+
+  const addTrade = async () => {
+    if (!tradeShares || !tradePrice) return;
+    const trade = { id: Date.now(), date: tradeDate, type: tradeType, shares: parseFloat(tradeShares), price: parseFloat(tradePrice), fees: parseFloat(tradeFees) || 0 };
+    const updated = [...trades, trade];
+    setTrades(updated);
+    try { localStorage.setItem('mstr:trades', JSON.stringify(updated)); } catch (e) {}
+    setTradeShares(''); setTradePrice(''); setTradeFees('');
+  };
+
+  const deleteTrade = async (id) => {
+    const updated = trades.filter(t => t.id !== id);
+    setTrades(updated);
+    try { localStorage.setItem('mstr:trades', JSON.stringify(updated)); } catch (e) {}
+  };
+
+  // ============ POSITION MANAGEMENT ============
+  const openPosition = async (overrides = {}) => {
+    const f = { ...positionForm, ...overrides };
+    if (!f.shares || !f.entryPrice) return;
+    const pos = {
+      id: Date.now(),
+      openedAt: new Date().toISOString(),
+      shares: parseFloat(f.shares),
+      entryPrice: parseFloat(f.entryPrice),
+      stop: f.stop ? parseFloat(f.stop) : null,
+      target: f.target ? parseFloat(f.target) : null,
+      tag: f.tag || 'MANUAL',
+      notes: f.notes || '',
+      status: 'OPEN',
+    };
+    const updated = [...positions, pos];
+    setPositions(updated);
+    try { localStorage.setItem('mstr:positions', JSON.stringify(updated)); } catch (e) {}
+    setPositionForm({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' });
+  };
+
+  // Closing a position writes a paired SELL entry into the trades journal so realised P&L
+  // continues to flow through journalStats unchanged.
+  const closePosition = async (id, exitPrice, exitFees = 0) => {
+    const pos = positions.find(p => p.id === id);
+    if (!pos) return;
+    const exit = parseFloat(exitPrice);
+    if (!exit || isNaN(exit)) return;
+    const updated = positions.map(p => p.id === id ? { ...p, status: 'CLOSED', closedAt: new Date().toISOString(), exitPrice: exit, exitFees: parseFloat(exitFees) || 0 } : p);
+    setPositions(updated);
+    try { localStorage.setItem('mstr:positions', JSON.stringify(updated)); } catch (e) {}
+    // Write closing leg to trades journal as a SELL
+    const closingTrade = { id: Date.now(), date: new Date().toISOString().slice(0, 10), type: 'SELL', shares: pos.shares, price: exit, fees: parseFloat(exitFees) || 0, fromPositionId: id };
+    const tradesUpdated = [...trades, closingTrade];
+    setTrades(tradesUpdated);
+    try { localStorage.setItem('mstr:trades', JSON.stringify(tradesUpdated)); } catch (e) {}
+  };
+
+  const deletePosition = async (id) => {
+    const updated = positions.filter(p => p.id !== id);
+    setPositions(updated);
+    try { localStorage.setItem('mstr:positions', JSON.stringify(updated)); } catch (e) {}
+  };
+
+  // ============ JSON BACKUP / RESTORE ============
+  const [importText, setImportText] = useState('');
+  const [importResult, setImportResult] = useState(null);
+
+  // Builds the JSON payload (kept in one place so clipboard and file exports stay in sync).
+  const buildExportPayload = () => ({
+    version: 13,
+    exportedAt: new Date().toISOString(),
+    settings: {
+      mstrPrice, btcPrice, ma200, lastUpdated,
+      high20, low20, high50, low50, low200, atr14,
+      nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma,
+      weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares,
+      corporateBaseUpdated, startingShares, cashBuffer, gbpUsd,
+      levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh,
+      aggressionStyle,
+    },
+    trades,
+    snapshots,
+    positions,
+  });
+
+  const exportJSON = async () => {
+    const text = JSON.stringify(buildExportPayload(), null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      setImportResult({ ok: true, msg: `Exported ${trades.length} trades, ${positions.length} positions, ${snapshots.length} snapshots to clipboard.` });
+    } catch (e) {
+      setImportResult({ ok: true, msg: 'Export ready below — copy manually (clipboard blocked).', payload: text });
+    }
+    setTimeout(() => setImportResult(null), 8000);
+  };
+
+  // File-download export: more reliable on mobile where clipboard permissions are flaky.
+  const exportJSONFile = () => {
+    const text = JSON.stringify(buildExportPayload(), null, 2);
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `mstr-cycle-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setImportResult({ ok: true, msg: `Downloaded mstr-cycle-${stamp}.json` });
+    setTimeout(() => setImportResult(null), 6000);
+  };
+
+  // File-upload import: counterpart to exportJSONFile.
+  const importJSONFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => { setImportText(String(e.target.result || '')); };
+    reader.readAsText(file);
+  };
+
+  const importJSON = async () => {
+    if (!importText.trim()) return;
+    try {
+      const p = JSON.parse(importText);
+      if (p.settings) {
+        const s = p.settings;
+        if (s.mstrPrice !== undefined) setMstrPrice(s.mstrPrice);
+        if (s.btcPrice !== undefined) setBtcPrice(s.btcPrice);
+        if (s.ma200 !== undefined) setMa200(s.ma200);
+        if (s.lastUpdated !== undefined) setLastUpdated(s.lastUpdated);
+        if (s.high20 !== undefined) setHigh20(s.high20);
+        if (s.low20 !== undefined) setLow20(s.low20);
+        if (s.high50 !== undefined) setHigh50(s.high50);
+        if (s.low50 !== undefined) setLow50(s.low50);
+        if (s.low200 !== undefined) setLow200(s.low200);
+        if (s.atr14 !== undefined) setAtr14(s.atr14);
+        if (s.nupl !== undefined) setNupl(s.nupl);
+        if (s.mvrv !== undefined) setMvrv(s.mvrv);
+        if (s.fundingNegative !== undefined) setFundingNegative(s.fundingNegative);
+        if (s.derivativesExhaustion !== undefined) setDerivativesExhaustion(s.derivativesExhaustion);
+        if (s.below200ma !== undefined) setBelow200ma(s.below200ma);
+        if (s.weeklyLowerLow !== undefined) setWeeklyLowerLow(s.weeklyLowerLow);
+        if (s.dxyAbove110 !== undefined) setDxyAbove110(s.dxyAbove110);
+        if (s.btcHoldings !== undefined) setBtcHoldings(s.btcHoldings);
+        if (s.dilutedShares !== undefined) setDilutedShares(s.dilutedShares);
+        if (s.corporateBaseUpdated !== undefined) setCorporateBaseUpdated(s.corporateBaseUpdated);
+        if (s.startingShares !== undefined) setStartingShares(s.startingShares);
+        if (s.cashBuffer !== undefined) setCashBuffer(s.cashBuffer);
+        if (s.gbpUsd !== undefined) setGbpUsd(s.gbpUsd);
+        if (s.levelsAuto !== undefined) setLevelsAuto(s.levelsAuto);
+        if (s.manualSellLow !== undefined) setManualSellLow(s.manualSellLow);
+        if (s.manualSellHigh !== undefined) setManualSellHigh(s.manualSellHigh);
+        if (s.manualBuyLow !== undefined) setManualBuyLow(s.manualBuyLow);
+        if (s.manualBuyHigh !== undefined) setManualBuyHigh(s.manualBuyHigh);
+        if (s.aggressionStyle !== undefined) setAggressionStyle(s.aggressionStyle);
+      }
+      if (Array.isArray(p.trades)) {
+        setTrades(p.trades);
+        try { localStorage.setItem('mstr:trades', JSON.stringify(p.trades)); } catch (e) {}
+      }
+      if (Array.isArray(p.snapshots)) {
+        setSnapshots(p.snapshots);
+        try { localStorage.setItem('mstr:snapshots', JSON.stringify(p.snapshots)); } catch (e) {}
+      }
+      if (Array.isArray(p.positions)) {
+        setPositions(p.positions);
+        try { localStorage.setItem('mstr:positions', JSON.stringify(p.positions)); } catch (e) {}
+      }
+      setImportText('');
+      setImportResult({ ok: true, msg: `Imported: ${p.trades?.length ?? 0} trades, ${p.positions?.length ?? 0} positions, ${p.snapshots?.length ?? 0} snapshots.` });
+    } catch (e) {
+      setImportResult({ ok: false, msg: `Import failed: ${e.message}` });
+    }
+    setTimeout(() => setImportResult(null), 8000);
+  };
+
+  const deleteSnapshot = async (date) => {
+    const updated = snapshots.filter(s => s.date !== date);
+    setSnapshots(updated);
+    try { localStorage.setItem('mstr:snapshots', JSON.stringify(updated)); } catch (e) {}
+  };
+
+  // ============ STYLES ============
+  const colors = {
+    bg: '#0a0806', panel: '#14100c', border: '#2a2520',
+    text: '#d4c8b8', textDim: '#a89580', textMute: '#8a7a65', textFaint: '#5a5048',
+    gold: '#d4a017', red: '#c73e1d', green: '#2d8659', highlight: '#e8dcc8',
+  };
+  const serif = 'Georgia, "Times New Roman", serif';
+
+  // ============ TYPOGRAPHY SCALE ============
+  // Consolidated from ~8 ad-hoc sizes scattered through the file. Five steps cover everything:
+  //   eyebrow: tiny uppercase labels above values (9-10px)
+  //   meta:    secondary inline metadata (10-11px)
+  //   body:    standard reading text (12-13px)
+  //   value:   numeric values, mode labels (15-22px)
+  //   hero:    the single largest element on a card (28-32px)
+  const t = {
+    eyebrow: { fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase', color: colors.textMute },
+    meta:    { fontSize: '11px', color: colors.textDim },
+    body:    { fontSize: '13px', color: colors.text, lineHeight: 1.55 },
+    value:   { fontSize: '15px', color: colors.text, fontWeight: 600 },
+    hero:    { fontSize: '28px', color: colors.highlight, fontWeight: 600, letterSpacing: '-0.01em' },
+  };
+
+  // Section header style — used across all cards for consistency
+  const sectionHeader = {
+    fontSize: '10px', color: colors.textMute, letterSpacing: '0.2em',
+    textTransform: 'uppercase', marginBottom: '14px', fontWeight: 500,
+  };
+
+  const staleColor = !daysSinceBaseUpdate && daysSinceBaseUpdate !== 0 ? colors.textFaint
+    : daysSinceBaseUpdate > 60 ? colors.red
+    : daysSinceBaseUpdate > 30 ? colors.gold
+    : colors.textMute;
+
+  const SignalToggle = ({ value, onChange, label, helperUrl, bottomTone }) => (
+    <div style={{ marginBottom: '8px' }}>
+      <div onClick={() => onChange(!value)} style={{
+        display: 'flex', alignItems: 'center', padding: '10px 14px',
+        background: value ? (bottomTone ? '#0f1a13' : '#2a1f1a') : '#0f0d0a',
+        border: `1px solid ${value ? (bottomTone ? colors.green : colors.red) : colors.border}`,
+        borderRadius: '4px', cursor: 'pointer', transition: 'all 0.2s',
+      }}>
+        <div style={{ width: '14px', height: '14px', borderRadius: '2px',
+          border: `2px solid ${value ? (bottomTone ? colors.green : colors.red) : colors.textFaint}`,
+          background: value ? (bottomTone ? colors.green : colors.red) : 'transparent',
+          marginRight: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '10px', color: '#000', flexShrink: 0 }}>{value && '✓'}</div>
+        <span style={{ color: colors.text, fontSize: '13px', fontFamily: serif, flex: 1 }}>{label}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: '4px', paddingLeft: '14px', fontSize: '10px' }}>
+        {helperUrl && <a href={helperUrl} target="_blank" rel="noopener noreferrer" style={{ color: colors.gold, textDecoration: 'none', letterSpacing: '0.05em' }}>check →</a>}
+      </div>
+    </div>
+  );
+
+  const NumberInput = ({ value, onChange, step, label, suffix = '', precision = 0, min, max }) => {
+    // Hold edit state as string so typing decimals like "333." doesn't get clobbered
+    const [editValue, setEditValue] = useState(String(value));
+    const [isFocused, setIsFocused] = useState(false);
+
+    // When value prop changes externally (not from this input) and we're not focused, sync
+    useEffect(() => {
+      if (!isFocused) setEditValue(String(value));
+    }, [value, isFocused]);
+
+    const commit = (raw) => {
+      // Clean leading zeros except for "0.x" patterns
+      let cleaned = raw.replace(/^0+(\d)/, '$1');
+      if (cleaned === '' || cleaned === '-' || cleaned === '.') {
+        onChange(0); setEditValue('0'); return;
+      }
+      const n = Number(cleaned);
+      if (isNaN(n)) { setEditValue(String(value)); return; }
+      let bounded = n;
+      if (min !== undefined) bounded = Math.max(min, bounded);
+      if (max !== undefined) bounded = Math.min(max, bounded);
+      const final = Number(bounded.toFixed(precision));
+      onChange(final);
+      setEditValue(String(final));
+    };
+
+    const adjust = (delta) => {
+      let next = Number(value) + delta;
+      if (min !== undefined) next = Math.max(min, next);
+      if (max !== undefined) next = Math.min(max, next);
+      const final = Number(next.toFixed(precision));
+      onChange(final);
+      setEditValue(String(final));
+    };
+
+    return (
+      <div style={{ marginBottom: '14px', minWidth: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', alignItems: 'center' }}>
+          <span style={{ color: colors.textDim, fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: serif }}>{label}</span>
+          {suffix && <span style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.05em' }}>{suffix.trim()}</span>}
+        </div>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'stretch', minWidth: 0 }}>
+          <button onClick={() => adjust(-step)} style={{
+            width: '40px', flexShrink: 0,
+            background: colors.bg, border: `1px solid ${colors.border}`,
+            color: colors.gold, fontFamily: serif, fontSize: '16px', cursor: 'pointer',
+          }}>−</button>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={editValue}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => { setIsFocused(false); commit(editValue); }}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (/^-?\d*\.?\d*$/.test(raw)) {
+                setEditValue(raw);
+                if (raw !== '' && raw !== '-' && raw !== '.' && raw !== '-.') {
+                  const n = Number(raw);
+                  if (!isNaN(n)) onChange(n);
+                }
+              }
+            }}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+            style={{
+              flex: 1, minWidth: 0,
+              background: colors.bg, border: `1px solid ${colors.border}`,
+              color: colors.gold, padding: '8px 12px', fontFamily: serif,
+              fontSize: '15px', fontWeight: 600, textAlign: 'center',
+              boxSizing: 'border-box',
+            }}
+          />
+          <button onClick={() => adjust(step)} style={{
+            width: '40px', flexShrink: 0,
+            background: colors.bg, border: `1px solid ${colors.border}`,
+            color: colors.gold, fontFamily: serif, fontSize: '16px', cursor: 'pointer',
+          }}>+</button>
+        </div>
+      </div>
+    );
+  };
+
+  const SectionHeader = ({ children }) => (
+    <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '16px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '8px', fontFamily: serif }}>{children}</div>
+  );
+
+  // NavButton supports a `secondary` variant for less-frequent destinations (Snapshots, Backup).
+  // Primary buttons are larger and slightly bolder; secondaries are a quieter chip style.
+  const NavButton = ({ id, label, secondary }) => (
+    <button onClick={() => setView(id)} style={{
+      background: view === id ? colors.panel : 'transparent',
+      color: view === id ? colors.gold : (secondary ? colors.textMute : colors.textDim),
+      border: `1px solid ${view === id ? colors.gold : colors.border}`,
+      padding: secondary ? '5px 10px' : '8px 14px',
+      fontFamily: serif,
+      fontSize: secondary ? '10px' : '11px',
+      letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', flex: 1,
+      fontWeight: view === id ? 600 : 400,
+      transition: 'all 0.15s', borderRadius: '2px',
+    }}>{label}</button>
+  );
+
+  return (
+    <div style={{ minHeight: '100vh', background: `linear-gradient(180deg, ${colors.bg} 0%, ${colors.panel} 100%)`, padding: '24px 16px', fontFamily: serif, color: colors.text }}>
+      <div style={{ maxWidth: '720px', margin: '0 auto' }}>
+        {/* HEADER */}
+        <div style={{ marginBottom: '24px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '20px' }}>
+          <div style={{ fontSize: '10px', letterSpacing: '0.3em', color: colors.textMute, textTransform: 'uppercase', marginBottom: '8px' }}>
+            Cycle Decision Framework · v13.1
+          </div>
+          <h1 style={{ fontSize: '26px', fontWeight: 400, color: colors.highlight, margin: 0, fontStyle: 'italic' }}>MSTR Rotation</h1>
+          <h2 style={{ fontSize: '14px', fontWeight: 400, color: colors.textDim, margin: '4px 0 12px 0', letterSpacing: '0.05em' }}>Rotate · Hoard · Deploy</h2>
+          <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', fontSize: '12px', marginTop: '12px', alignItems: 'center' }}>
+            <div><span style={{ color: colors.textMute }}>BTC </span><span style={{ color: colors.gold }}>${btcPrice.toLocaleString()}</span></div>
+            <div><span style={{ color: colors.textMute }}>MSTR </span><span style={{ color: colors.gold }}>${mstrPrice.toFixed(2)}</span></div>
+            <div><span style={{ color: colors.textMute }}>200MA </span><span style={{ color: colors.gold }}>{ma200 ? `$${ma200.toFixed(2)}` : '—'}</span></div>
+            <div style={{ color: colors.textMute }}>mNAV <span style={{ color: mNAV > 1.5 ? colors.red : mNAV < 1.0 ? colors.green : colors.gold }}>{mNAV.toFixed(2)}x</span></div>
+          </div>
+          <div style={{ fontSize: '9px', color: colors.textFaint, marginTop: '6px', letterSpacing: '0.05em' }}>
+            Prompt-driven updates. Use the panel below to refresh all readings at once.{lastUpdated && <span> · last updated: {lastUpdated}</span>}
+          </div>
+        </div>
+
+        {/* Two-row nav: trade-flow tabs on top, persistence tabs (Log/Backup) demoted to secondary row */}
+        <div style={{ marginBottom: '20px' }}>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+            <NavButton id="dashboard" label="Dashboard" />
+            <NavButton id="positions" label={`Open · ${positions.filter(p => p.status === 'OPEN').length}`} />
+            <NavButton id="journal" label={`Journal · ${trades.length}`} />
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <NavButton id="snapshots" label={`Log · ${snapshots.length}`} secondary />
+            <NavButton id="backup" label="Backup" secondary />
+          </div>
+        </div>
+
+        {view === 'dashboard' && (
+          <>
+            {/* ============================================================
+                MODE CARD — Hero section.
+                Three tiers of hierarchy:
+                  1. HERO ROW: mode label, current price, verdict, position-in-range bar
+                  2. TRIGGERS: split SELL/BUY cards, only render when active
+                  3. ZONES: the three level columns, deemphasised relative to hero
+                  4. FOOTER: aggression style + auto/manual toggle (least prominent)
+               ============================================================ */}
+            <div style={{
+              background: cfg.bg, border: `1px solid ${cfg.color}`,
+              padding: '20px', marginBottom: '20px', position: 'relative',
+            }}>
+              {/* TIER 1: Hero row */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', gap: '16px', flexWrap: 'wrap' }}>
+                <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                  <div style={{ ...t.eyebrow, color: cfg.color, marginBottom: '6px' }}>Active mode</div>
+                  <div style={{ fontSize: '20px', color: cfg.color, fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.1 }}>{cfg.label}</div>
+                </div>
+                <div style={{ flex: '0 0 auto', textAlign: 'right' }}>
+                  <div style={{ ...t.eyebrow, marginBottom: '6px' }}>MSTR</div>
+                  <div style={{ ...t.hero, color: priceRange?.tone || colors.highlight, lineHeight: 1 }}>${mstrPrice.toFixed(2)}</div>
+                  {priceRange?.verdict && (
+                    <div style={{ ...t.eyebrow, color: priceRange.tone, marginTop: '6px', letterSpacing: '0.18em', fontWeight: 600 }}>{priceRange.verdict}</div>
+                  )}
+                </div>
+              </div>
+
+              {/* TIER 1b: Position-in-range bar — only meaningful in ROTATE mode */}
+              {priceRange?.pct !== null && priceRange?.pct !== undefined && mode === 'ROTATE' && (
+                <div style={{ marginBottom: '18px' }}>
+                  <div style={{ position: 'relative', height: '6px', background: '#0a0806', borderRadius: '3px', overflow: 'hidden', border: `1px solid ${colors.border}` }}>
+                    {/* Buy zone band */}
+                    <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0,
+                      width: `${((priceRange.buyHigh - priceRange.lo) / (priceRange.hi - priceRange.lo)) * 100}%`,
+                      background: 'rgba(45, 134, 89, 0.25)' }} />
+                    {/* Sell zone band */}
+                    <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0,
+                      width: `${((priceRange.hi - priceRange.sellLow) / (priceRange.hi - priceRange.lo)) * 100}%`,
+                      background: 'rgba(199, 62, 29, 0.25)' }} />
+                    {/* Current price marker */}
+                    <div style={{ position: 'absolute', left: `${priceRange.pct * 100}%`, top: '-3px', bottom: '-3px', width: '2px',
+                      background: priceRange.tone, boxShadow: `0 0 6px ${priceRange.tone}` }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', ...t.eyebrow, marginTop: '4px' }}>
+                    <span>${priceRange.lo.toFixed(0)}</span>
+                    <span style={{ color: colors.textFaint }}>Buy band &nbsp;·&nbsp; Sell band</span>
+                    <span>${priceRange.hi.toFixed(0)}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Action line */}
+              <div style={{ ...t.body, marginBottom: '18px' }}>{cfg.action}</div>
+
+              {/* Warnings */}
+              {deploySuppressed && (
+                <div style={{ ...t.meta, color: colors.gold, marginBottom: '14px', padding: '10px 12px', background: '#1a1611', border: `1px dashed ${colors.gold}`, borderRadius: '3px' }}>
+                  ⚠ Bottom score is at deploy threshold, but MSTR is still above $140. Holding HOARD until price confirms.
+                </div>
+              )}
+              {levelsAuto && !technicals && (
+                <div style={{ ...t.meta, color: colors.red, marginBottom: '14px', padding: '10px 12px', background: '#1a0f0d', border: `1px dashed ${colors.red}`, borderRadius: '3px' }}>
+                  ⚠ Auto-levels unavailable — paste a prompt response below, or switch to manual override.
+                </div>
+              )}
+
+              {/* TIER 2: Live triggers — split by side, only render if active */}
+              {bandHits.length > 0 && (() => {
+                const sellHits = bandHits.filter(h => h.side === 'SELL');
+                const buyHits = bandHits.filter(h => h.side === 'BUY');
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: sellHits.length && buyHits.length ? '1fr 1fr' : '1fr', gap: '10px', marginBottom: '18px' }}>
+                    {sellHits.length > 0 && (
+                      <div style={{ background: 'rgba(199, 62, 29, 0.08)', border: `1px solid ${colors.red}`, padding: '12px', borderRadius: '3px' }}>
+                        <div style={{ ...t.eyebrow, color: colors.red, marginBottom: '8px', fontWeight: 600 }}>● Sell trigger live</div>
+                        {sellHits.map(h => (
+                          <div key={h.tag} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                            <div style={{ ...t.meta, color: colors.text }}>
+                              <div style={{ fontSize: '12px', fontWeight: 600 }}>{h.label}</div>
+                              <div style={{ ...t.meta }}>@ {h.zone}</div>
+                            </div>
+                            <button onClick={() => { setView('positions'); setPositionForm(pf => ({ ...pf, entryPrice: String(h.price), tag: h.tag })); }}
+                              style={{ background: colors.red, border: 'none', color: '#fff', padding: '6px 12px', fontFamily: serif, fontSize: '10px', letterSpacing: '0.12em', fontWeight: 600, cursor: 'pointer', borderRadius: '2px' }}>
+                              SELL
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {buyHits.length > 0 && (
+                      <div style={{ background: 'rgba(45, 134, 89, 0.08)', border: `1px solid ${colors.green}`, padding: '12px', borderRadius: '3px' }}>
+                        <div style={{ ...t.eyebrow, color: colors.green, marginBottom: '8px', fontWeight: 600 }}>● Buy trigger live</div>
+                        {buyHits.map(h => (
+                          <div key={h.tag} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                            <div style={{ ...t.meta, color: colors.text }}>
+                              <div style={{ fontSize: '12px', fontWeight: 600 }}>{h.label}</div>
+                              <div style={{ ...t.meta }}>@ {h.zone}</div>
+                            </div>
+                            <button onClick={() => { setView('positions'); setPositionForm(pf => ({ ...pf, entryPrice: String(h.price), tag: h.tag })); }}
+                              style={{ background: colors.green, border: 'none', color: '#fff', padding: '6px 12px', fontFamily: serif, fontSize: '10px', letterSpacing: '0.12em', fontWeight: 600, cursor: 'pointer', borderRadius: '2px' }}>
+                              BUY
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* TIER 3: Zones grid — divider line separates from hero.
+                  "Alert at" lines below each zone surface the single-number alert price
+                  (inner-edge for ROTATE bands, raw target for HOARD/DEPLOY anchors). */}
+              <div style={{ paddingTop: '16px', borderTop: `1px solid ${colors.border}`, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
+                <div>
+                  <div style={{ ...t.eyebrow, marginBottom: '6px' }}>Sell zone</div>
+                  <div style={{ color: colors.highlight, fontWeight: 600, fontSize: '13px' }}>{currentLevels.sell}</div>
+                  {(mode === 'ROTATE' || mode === 'HOARD') && alertLevels[mode.toLowerCase()].sellAlert != null && (
+                    <div style={{ ...t.eyebrow, marginTop: '6px', color: colors.gold, letterSpacing: '0.12em', fontWeight: 500 }}>
+                      Alert ${alertLevels[mode.toLowerCase()].sellAlert.toFixed(2)}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div style={{ ...t.eyebrow, marginBottom: '6px' }}>Buy zone</div>
+                  <div style={{ color: colors.highlight, fontWeight: 600, fontSize: mode === 'DEPLOY' ? '10px' : '13px', lineHeight: 1.3 }}>{currentLevels.buy}</div>
+                  {mode === 'ROTATE' && alertLevels.rotate.buyAlert != null && (
+                    <div style={{ ...t.eyebrow, marginTop: '6px', color: colors.gold, letterSpacing: '0.12em', fontWeight: 500 }}>
+                      Alert ${alertLevels.rotate.buyAlert.toFixed(2)}
+                    </div>
+                  )}
+                  {mode === 'HOARD' && (
+                    <div style={{ ...t.eyebrow, marginTop: '6px', color: colors.gold, letterSpacing: '0.12em', fontWeight: 500, lineHeight: 1.5 }}>
+                      Alert ${alertLevels.hoard.buyAlert.toFixed(2)}
+                      {alertLevels.hoard.buyDeepAlert != null && (
+                        <><br/>+ ${alertLevels.hoard.buyDeepAlert.toFixed(2)} deep</>
+                      )}
+                    </div>
+                  )}
+                  {mode === 'DEPLOY' && alertLevels.deploy.ladder.length > 0 && (
+                    <div style={{ ...t.eyebrow, marginTop: '6px', color: colors.gold, letterSpacing: '0.12em', fontWeight: 500, lineHeight: 1.5 }}>
+                      Set {alertLevels.deploy.ladder.length} alerts:<br/>
+                      {alertLevels.deploy.ladder.map(l => `$${l.toFixed(2)}`).join(' · ')}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div style={{ ...t.eyebrow, marginBottom: '6px' }}>Cash hold</div>
+                  <div style={{ color: colors.highlight, fontWeight: 600, fontSize: '13px' }}>{cfg.cash}</div>
+                </div>
+              </div>
+
+              {/* TIER 4: Footer — aggression style + auto/manual toggle */}
+              <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: `1px solid ${colors.border}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                  <span style={{ ...t.eyebrow }}>Style</span>
+                  {['conservative', 'moderate', 'aggressive'].map(s => {
+                    const active = aggressionStyle === s;
+                    return (
+                      <button key={s} onClick={() => setAggressionStyle(s)} style={{
+                        background: active ? cfg.color : 'transparent',
+                        color: active ? '#000' : colors.textDim,
+                        border: `1px solid ${active ? cfg.color : colors.border}`,
+                        padding: '3px 9px', fontFamily: serif, fontSize: '10px',
+                        letterSpacing: '0.1em', textTransform: 'uppercase',
+                        cursor: 'pointer', fontWeight: active ? 600 : 400,
+                        borderRadius: '2px', transition: 'all 0.15s',
+                      }}>{s === 'moderate' ? 'Mod' : s.charAt(0).toUpperCase() + s.slice(1, 4)}</button>
+                    );
+                  })}
+                  <span style={{ ...t.meta, color: colors.textMute, marginLeft: '4px', fontSize: '10px' }}>
+                    {profile.rotationSizePctLow}–{profile.rotationSizePctHigh}% rotation
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...t.meta, color: colors.textMute, fontSize: '10px', gap: '8px' }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {levelsAuto && technicals
+                      ? `ATR(14) $${technicals.atr14.toFixed(1)} · ${technicals.low20.toFixed(0)}–${technicals.high20.toFixed(0)}${!ma200 ? ' · 200MA missing' : ''}`
+                      : 'Manual levels'}
+                  </span>
+                  <span onClick={() => setLevelsAuto(!levelsAuto)} style={{ cursor: 'pointer', color: levelsAuto ? colors.green : colors.textMute, letterSpacing: '0.05em', flexShrink: 0 }}>
+                    {levelsAuto ? '● auto' : '○ manual'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* MANUAL LEVELS PANEL (when auto is off) */}
+            {!levelsAuto && (
+              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
+                <SectionHeader>◆ Manual level overrides</SectionHeader>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '11px' }}>
+                  <div><div style={{ color: colors.textMute, marginBottom: '4px' }}>Sell zone low</div><input type="number" value={manualSellLow} onChange={(e) => setManualSellLow(Number(e.target.value))} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '6px 10px', fontFamily: serif, fontSize: '12px' }} /></div>
+                  <div><div style={{ color: colors.textMute, marginBottom: '4px' }}>Sell zone high</div><input type="number" value={manualSellHigh} onChange={(e) => setManualSellHigh(Number(e.target.value))} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '6px 10px', fontFamily: serif, fontSize: '12px' }} /></div>
+                  <div><div style={{ color: colors.textMute, marginBottom: '4px' }}>Buy zone low</div><input type="number" value={manualBuyLow} onChange={(e) => setManualBuyLow(Number(e.target.value))} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '6px 10px', fontFamily: serif, fontSize: '12px' }} /></div>
+                  <div><div style={{ color: colors.textMute, marginBottom: '4px' }}>Buy zone high</div><input type="number" value={manualBuyHigh} onChange={(e) => setManualBuyHigh(Number(e.target.value))} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '6px 10px', fontFamily: serif, fontSize: '12px' }} /></div>
+                </div>
+              </div>
+            )}
+
+            {/* TECHNICAL READOUT */}
+            {levelsAuto && technicals && (
+              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
+                <SectionHeader>◆ Technical readout</SectionHeader>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', fontSize: '11px' }}>
+                  <div><div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>20d high</div><div style={{ color: colors.text, fontSize: '13px', marginTop: '2px' }}>${technicals.high20.toFixed(0)}</div></div>
+                  <div><div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>20d low</div><div style={{ color: colors.text, fontSize: '13px', marginTop: '2px' }}>${technicals.low20.toFixed(0)}</div></div>
+                  <div><div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>50d high</div><div style={{ color: colors.text, fontSize: '13px', marginTop: '2px' }}>${technicals.high50.toFixed(0)}</div></div>
+                  <div><div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>200d low</div><div style={{ color: colors.text, fontSize: '13px', marginTop: '2px' }}>${technicals.low200.toFixed(0)}</div></div>
+                </div>
+                <div style={{ marginTop: '12px', fontSize: '11px', color: colors.textDim }}>
+                  ATR(14): ${technicals.atr14.toFixed(2)} — typical daily true range. Sell/buy bands set to ±0.4 ATR around target.
+                </div>
+              </div>
+            )}
+
+            {/* PORTFOLIO SUMMARY */}
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
+              <SectionHeader>◆ Portfolio</SectionHeader>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '12px', marginBottom: '16px' }}>
+                <div>
+                  <div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px' }}>Position</div>
+                  <div style={{ color: colors.highlight, fontSize: '20px', fontWeight: 600 }}>{journalStats.currentShares.toFixed(0)} sh</div>
+                  <div style={{ color: colors.gold, fontSize: '13px', marginTop: '2px' }}>£{portfolio.positionGBP.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
+                  <div style={{ color: colors.textMute, fontSize: '10px', marginTop: '2px' }}>${portfolio.positionUSD.toLocaleString(undefined, {maximumFractionDigits: 0})} · {portfolio.positionPct.toFixed(0)}% of total</div>
+                </div>
+                <div>
+                  <div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '4px' }}>Cash buffer</div>
+                  <div style={{ color: colors.highlight, fontSize: '20px', fontWeight: 600 }}>£{cashBuffer.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
+                  <div style={{ color: colors.gold, fontSize: '13px', marginTop: '2px' }}>&nbsp;</div>
+                  <div style={{ color: portfolio.cashPct > 50 ? colors.gold : colors.textMute, fontSize: '10px', marginTop: '2px' }}>{portfolio.cashPct.toFixed(0)}% of total</div>
+                </div>
+              </div>
+              <div style={{ paddingTop: '12px', borderTop: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Total portfolio</span>
+                <span style={{ color: colors.highlight, fontSize: '18px', fontWeight: 600 }}>£{portfolio.totalGBP.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+              </div>
+              {/* Cash hold guidance vs mode */}
+              {portfolio.cashPct > 30 && mode === 'ROTATE' && (
+                <div style={{ marginTop: '12px', fontSize: '10px', color: colors.gold, padding: '8px 10px', background: '#1a1611', border: `1px dashed ${colors.gold}`, lineHeight: 1.5 }}>
+                  ⚠ {portfolio.cashPct.toFixed(0)}% cash exceeds the 0–25% guideline for ROTATE mode. Consider deploying via DCA ladder.
+                </div>
+              )}
+              <div style={{ marginTop: '14px' }}>
+                <NumberInput value={cashBuffer} onChange={setCashBuffer} step={500} label="Cash buffer (GBP)" min={0} max={500000} />
+                <NumberInput value={gbpUsd} onChange={setGbpUsd} step={0.01} label="GBP/USD rate" precision={2} min={0.5} max={3.0} />
+              </div>
+            </div>
+
+            {/* CYCLE CLOCK */}
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
+              <SectionHeader>◆ BTC cycle clock</SectionHeader>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '12px' }}>
+                <div><div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em' }}>ATH</div><div style={{ fontSize: '13px', color: colors.text }}>Oct 6, 2025</div><div style={{ fontSize: '11px', color: colors.gold }}>$126k</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: '24px', color: colors.gold, fontWeight: 600 }}>{cycleData.progress.toFixed(0)}%</div><div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em' }}>through correction</div></div>
+                <div style={{ textAlign: 'right' }}><div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em' }}>Projected bottom</div><div style={{ fontSize: '13px', color: colors.text }}>Oct 6, 2026</div><div style={{ fontSize: '11px', color: colors.gold }}>$37–55k</div></div>
+              </div>
+              <div style={{ height: '8px', background: colors.bg, border: `1px solid ${colors.border}`, position: 'relative', overflow: 'hidden' }}>
+                <div style={{ width: `${cycleData.progress}%`, height: '100%', background: `linear-gradient(90deg, ${colors.gold} 0%, ${colors.red} 100%)` }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: colors.textMute, marginTop: '6px' }}>
+                <span>Day {cycleData.elapsed} of {cycleData.totalDays}</span>
+                <span>{cycleData.remaining > 0 ? `${cycleData.remaining} days remaining` : `${Math.abs(cycleData.remaining)} days past`}</span>
+              </div>
+            </div>
+
+            {/* SCORES */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
+              <div style={{ background: colors.panel, padding: '16px', border: `1px solid ${colors.border}` }}>
+                <div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '8px' }}>Bear signals</div>
+                <div style={{ fontSize: '28px', color: bearScore >= 6 ? colors.red : colors.gold, fontWeight: 600 }}>{bearScore}<span style={{ fontSize: '14px', color: colors.textFaint }}> / 13</span></div>
+                <div style={{ fontSize: '10px', color: colors.textMute, marginTop: '4px' }}>≥6 → HOARD</div>
+              </div>
+              <div style={{ background: colors.panel, padding: '16px', border: `1px solid ${colors.border}` }}>
+                <div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '8px' }}>Bottom signals</div>
+                <div style={{ fontSize: '28px', color: bottomScore >= 7 ? colors.green : colors.gold, fontWeight: 600 }}>{bottomScore}<span style={{ fontSize: '14px', color: colors.textFaint }}> / 17</span></div>
+                <div style={{ fontSize: '10px', color: colors.textMute, marginTop: '4px' }}>≥7 + MSTR&lt;$140 → DEPLOY</div>
+              </div>
+            </div>
+
+            {/* mNAV */}
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
+              <SectionHeader>◆ mNAV tracker</SectionHeader>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '12px', marginBottom: '14px' }}>
+                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>BTC per share</div><div style={{ color: colors.highlight, fontSize: '15px', marginTop: '2px' }}>{btcPerShare.toFixed(5)} BTC</div></div>
+                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Fair value</div><div style={{ color: colors.highlight, fontSize: '15px', marginTop: '2px' }}>${fairValue.toFixed(2)}</div></div>
+                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Current price</div><div style={{ color: colors.highlight, fontSize: '15px', marginTop: '2px' }}>${mstrPrice.toFixed(2)}</div></div>
+                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>mNAV ratio</div><div style={{ color: mNAV > 1.5 ? colors.red : mNAV < 1.0 ? colors.green : colors.gold, fontSize: '15px', marginTop: '2px', fontWeight: 600 }}>{mNAV.toFixed(2)}x</div></div>
+              </div>
+              <div style={{ fontSize: '11px', color: colors.textDim, lineHeight: 1.6, borderTop: `1px solid ${colors.border}`, paddingTop: '12px' }}>
+                {mNAV < 1.0 && '⚠ Below 1.0x: MSTR at discount to BTC holdings.'}
+                {mNAV >= 1.0 && mNAV < 1.3 && 'Modest premium. Healthy accumulation zone.'}
+                {mNAV >= 1.3 && mNAV < 1.8 && 'Standard premium.'}
+                {mNAV >= 1.8 && '⚠ Elevated premium. Consider trimming.'}
+              </div>
+              <div style={{ marginTop: '14px' }}>
+                <NumberInput value={btcHoldings} onChange={handleHoldingsChange} step={100} label="BTC holdings" min={0} max={5000000} />
+                <NumberInput value={dilutedShares} onChange={handleSharesChange} step={1} label="Diluted shares (M)" precision={1} min={1} max={2000} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', fontSize: '10px' }}>
+                <span style={{ color: staleColor }}>Base updated: {corporateBaseUpdated || 'never'}{daysSinceBaseUpdate !== null && ` · ${daysSinceBaseUpdate}d ago`}</span>
+                <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001050446&type=8-K&dateb=&owner=include&count=40" target="_blank" rel="noopener noreferrer" style={{ color: colors.gold, textDecoration: 'none' }}>verify via SEC ↗</a>
+              </div>
+            </div>
+
+            <button onClick={saveSnapshot} style={{ width: '100%', background: colors.panel, border: `1px solid ${colors.gold}`, color: colors.gold, padding: '12px', fontFamily: serif, fontSize: '12px', letterSpacing: '0.15em', textTransform: 'uppercase', cursor: 'pointer', marginBottom: '24px' }}>
+              ◆ Save snapshot to log
+            </button>
+
+            <div style={{ marginBottom: '24px' }}>
+              <SectionHeader>◆ Manual price override</SectionHeader>
+              <NumberInput value={mstrPrice} onChange={setMstrPrice} step={1} label="MSTR price" suffix="USD" min={1} max={1000} />
+              <NumberInput value={btcPrice} onChange={setBtcPrice} step={500} label="BTC price" suffix="USD" min={1000} max={500000} />
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
+              <SectionHeader>◆ On-chain readings (update weekly)</SectionHeader>
+              <NumberInput value={nupl} onChange={setNupl} step={1} label="BTC NUPL" suffix="%" min={-100} max={100} />
+              <NumberInput value={mvrv} onChange={setMvrv} step={0.1} label="BTC MVRV" precision={1} min={0} max={10} />
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
+              <SectionHeader>◆ Bear signals</SectionHeader>
+              <SignalToggle value={below200ma} onChange={setBelow200ma} label={`MSTR below 200-day MA${ma200 ? ` ($${ma200.toFixed(2)})` : ''}`} helperUrl="https://www.tradingview.com/symbols/NASDAQ-MSTR/" />
+              <SignalToggle value={weeklyLowerLow} onChange={setWeeklyLowerLow} label="MSTR weekly lower-low after lower-high" helperUrl="https://www.tradingview.com/chart/?symbol=NASDAQ%3AMSTR&interval=W" />
+              <SignalToggle value={fundingNegative} onChange={(v) => { setFundingNegative(v); if (v) setDerivativesExhaustion(false); }} label="BTC perp funding persistently negative (aggressive shorting)" helperUrl="https://www.coinglass.com/FundingRate" />
+              <SignalToggle value={dxyAbove110} onChange={setDxyAbove110} label="DXY above 110" helperUrl="https://www.tradingview.com/symbols/TVC-DXY/" />
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
+              <SectionHeader>◆ Bottom signals</SectionHeader>
+              <SignalToggle value={derivativesExhaustion} onChange={(v) => { setDerivativesExhaustion(v); if (v) setFundingNegative(false); }} label="BTC derivatives exhaustion (funding flat + OI multi-month lows)" helperUrl="https://www.coinglass.com/BitcoinOpenInterest" bottomTone />
+              <div style={{ fontSize: '10px', color: colors.textMute, lineHeight: 1.6, marginTop: '8px', paddingLeft: '14px' }}>Other bottom signals (extreme NUPL, MVRV, deep prices, cycle timing) score automatically.</div>
+            </div>
+
+            <div style={{ background: colors.panel, border: `1px solid ${colors.gold}`, padding: '20px', marginBottom: '24px' }}>
+              <SectionHeader>◆ Prompt-driven update (3 steps)</SectionHeader>
+              <div style={{ fontSize: '11px', color: colors.textDim, marginBottom: '12px', lineHeight: 1.6 }}>
+                <strong style={{ color: colors.gold }}>Step 1:</strong> copy the prompt below. <strong style={{ color: colors.gold }}>Step 2:</strong> paste into a new Claude chat, get the response. <strong style={{ color: colors.gold }}>Step 3:</strong> paste Claude's response into the panel below — fields auto-populate.
+              </div>
+              <textarea readOnly value={claudePrompt} style={{ width: '100%', height: '220px', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '12px', fontFamily: 'Menlo, monospace', fontSize: '11px', resize: 'vertical', lineHeight: 1.5, boxSizing: 'border-box' }} />
+              <button onClick={copyPrompt} style={{ width: '100%', marginTop: '10px', background: promptCopied ? colors.green : colors.gold, color: colors.bg, border: 'none', padding: '10px', fontFamily: serif, fontSize: '12px', letterSpacing: '0.15em', textTransform: 'uppercase', cursor: 'pointer', fontWeight: 600, transition: 'background 0.2s' }}>{promptCopied ? '✓ copied' : '◆ copy prompt'}</button>
+
+              <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: `1px solid ${colors.border}` }}>
+                <div style={{ fontSize: '11px', letterSpacing: '0.15em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '10px', fontFamily: serif }}>
+                  ◆ Paste Claude's response here
+                </div>
+                <textarea
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  placeholder={`Paste the code block (or the whole response) here. Expected format:\n\nMSTR_PRICE: 164\nBTC_PRICE: 77000\nNUPL: 28\nMVRV: 1.0\n...`}
+                  style={{ width: '100%', height: '140px', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '12px', fontFamily: 'Menlo, monospace', fontSize: '11px', resize: 'vertical', lineHeight: 1.5, boxSizing: 'border-box' }}
+                />
+                <button onClick={applyPaste} style={{ width: '100%', marginTop: '10px', background: colors.green, color: '#fff', border: 'none', padding: '10px', fontFamily: serif, fontSize: '12px', letterSpacing: '0.15em', textTransform: 'uppercase', cursor: 'pointer', fontWeight: 600 }}>
+                  ◆ apply readings
+                </button>
+                {pasteResult && (
+                  <div style={{
+                    marginTop: '10px', fontSize: '11px', padding: '10px 12px',
+                    background: pasteResult.ok ? '#0f1a13' : '#1a0f0d',
+                    border: `1px dashed ${pasteResult.ok ? colors.green : colors.red}`,
+                    color: pasteResult.ok ? colors.green : colors.red,
+                    lineHeight: 1.5,
+                  }}>
+                    {pasteResult.ok ? '✓ ' : '⚠ '}{pasteResult.msg}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {view === 'positions' && (
+          <>
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '20px' }}>
+              <SectionHeader>◆ Open new position</SectionHeader>
+              <div style={{ fontSize: '11px', color: colors.textDim, marginBottom: '14px' }}>
+                Positions track open trades separately from the closed-trade Journal. Closing a position auto-writes a paired entry into Journal so realised P&amp;L still flows through campaign stats.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '11px', marginBottom: '12px' }}>
+                <div><div style={{ color: colors.textMute, marginBottom: '4px' }}>Shares</div><input type="number" placeholder="Shares" value={positionForm.shares} onChange={(e) => setPositionForm({ ...positionForm, shares: e.target.value })} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: serif, fontSize: '12px' }} /></div>
+                <div><div style={{ color: colors.textMute, marginBottom: '4px' }}>Entry price (USD)</div><input type="number" placeholder="Entry" value={positionForm.entryPrice} onChange={(e) => setPositionForm({ ...positionForm, entryPrice: e.target.value })} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: serif, fontSize: '12px' }} /></div>
+                <div><div style={{ color: colors.textMute, marginBottom: '4px' }}>Stop (optional)</div><input type="number" placeholder="Stop" value={positionForm.stop} onChange={(e) => setPositionForm({ ...positionForm, stop: e.target.value })} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: serif, fontSize: '12px' }} /></div>
+                <div><div style={{ color: colors.textMute, marginBottom: '4px' }}>Target (optional)</div><input type="number" placeholder="Target" value={positionForm.target} onChange={(e) => setPositionForm({ ...positionForm, target: e.target.value })} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: serif, fontSize: '12px' }} /></div>
+                <div style={{ gridColumn: 'span 2' }}><div style={{ color: colors.textMute, marginBottom: '4px' }}>Tag / origin</div><input type="text" placeholder="e.g. ROTATE-BUY, HOARD-SELL, MANUAL" value={positionForm.tag} onChange={(e) => setPositionForm({ ...positionForm, tag: e.target.value })} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: serif, fontSize: '12px' }} /></div>
+                <div style={{ gridColumn: 'span 2' }}><div style={{ color: colors.textMute, marginBottom: '4px' }}>Notes</div><input type="text" placeholder="Optional notes" value={positionForm.notes} onChange={(e) => setPositionForm({ ...positionForm, notes: e.target.value })} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: serif, fontSize: '12px' }} /></div>
+              </div>
+              <button onClick={() => openPosition()} disabled={!positionForm.shares || !positionForm.entryPrice} style={{ width: '100%', background: positionForm.shares && positionForm.entryPrice ? colors.green : colors.border, color: '#fff', border: 'none', padding: '10px', fontFamily: serif, fontSize: '11px', letterSpacing: '0.15em', cursor: positionForm.shares && positionForm.entryPrice ? 'pointer' : 'not-allowed' }}>
+                OPEN POSITION
+              </button>
+            </div>
+
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px' }}>
+              <SectionHeader>◆ Positions ({positions.filter(p => p.status === 'OPEN').length} open · {positions.filter(p => p.status === 'CLOSED').length} closed)</SectionHeader>
+              {positions.length === 0 ? (
+                <div style={{ color: colors.textFaint, fontSize: '12px', textAlign: 'center', padding: '20px 0' }}>No positions yet. Open one above, or tap OPEN on a live trigger from the Dashboard.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {[...positions].sort((a, b) => (b.openedAt || '').localeCompare(a.openedAt || '')).map(p => {
+                    const isOpen = p.status === 'OPEN';
+                    const livePnL = isOpen ? (mstrPrice - p.entryPrice) * p.shares : (p.exitPrice - p.entryPrice) * p.shares - (p.exitFees || 0);
+                    const livePnLPct = isOpen ? ((mstrPrice / p.entryPrice) - 1) * 100 : ((p.exitPrice / p.entryPrice) - 1) * 100;
+                    const pnlColor = livePnL >= 0 ? colors.green : colors.red;
+                    return (
+                      <div key={p.id} style={{ background: colors.bg, border: `1px solid ${isOpen ? colors.border : '#222'}`, padding: '12px', opacity: isOpen ? 1 : 0.65 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px', gap: '8px', flexWrap: 'wrap' }}>
+                          <div>
+                            <span style={{ fontSize: '10px', color: isOpen ? colors.green : colors.textMute, letterSpacing: '0.15em', textTransform: 'uppercase' }}>{p.status}</span>
+                            <span style={{ fontSize: '10px', color: colors.textMute, marginLeft: '8px', letterSpacing: '0.1em' }}>{p.tag}</span>
+                          </div>
+                          <div style={{ fontSize: '10px', color: colors.textFaint }}>{(p.openedAt || '').slice(0, 10)}</div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '11px', marginBottom: '8px' }}>
+                          <div><div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Shares</div><div style={{ color: colors.text, fontWeight: 600 }}>{p.shares}</div></div>
+                          <div><div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Entry</div><div style={{ color: colors.text, fontWeight: 600 }}>${p.entryPrice.toFixed(2)}</div></div>
+                          <div><div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>{isOpen ? 'Live' : 'Exit'}</div><div style={{ color: pnlColor, fontWeight: 600 }}>{isOpen ? `$${mstrPrice.toFixed(2)}` : `$${p.exitPrice.toFixed(2)}`}</div></div>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', marginBottom: isOpen ? '10px' : 0 }}>
+                          <div style={{ color: colors.textMute }}>
+                            {p.stop ? `Stop $${p.stop}` : '—'} · {p.target ? `Target $${p.target}` : '—'}
+                          </div>
+                          <div style={{ color: pnlColor, fontWeight: 600 }}>
+                            {livePnL >= 0 ? '+' : ''}${livePnL.toFixed(0)} ({livePnLPct >= 0 ? '+' : ''}{livePnLPct.toFixed(1)}%)
+                          </div>
+                        </div>
+                        {p.notes && <div style={{ fontSize: '10px', color: colors.textFaint, fontStyle: 'italic', marginBottom: isOpen ? '10px' : 0 }}>{p.notes}</div>}
+                        {isOpen && (
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <input
+                              type="number"
+                              placeholder="Exit price"
+                              value={exitPrices[p.id] ?? ''}
+                              onChange={(e) => setExitPrices(prev => ({ ...prev, [p.id]: e.target.value }))}
+                              style={{ flex: 1, background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '6px 8px', fontFamily: serif, fontSize: '11px', borderRadius: '2px' }}
+                            />
+                            <button
+                              onClick={() => {
+                                const v = exitPrices[p.id];
+                                if (v && !isNaN(parseFloat(v))) {
+                                  closePosition(p.id, v, 0);
+                                  setExitPrices(prev => { const next = { ...prev }; delete next[p.id]; return next; });
+                                }
+                              }}
+                              disabled={!exitPrices[p.id]}
+                              style={{
+                                background: exitPrices[p.id] ? colors.red : colors.border,
+                                color: '#fff', border: 'none', padding: '6px 12px',
+                                fontFamily: serif, fontSize: '10px', letterSpacing: '0.1em',
+                                cursor: exitPrices[p.id] ? 'pointer' : 'not-allowed', borderRadius: '2px', fontWeight: 600,
+                              }}>CLOSE</button>
+                            <button onClick={() => deletePosition(p.id)} style={{ background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMute, padding: '6px 10px', fontFamily: serif, fontSize: '10px', cursor: 'pointer', borderRadius: '2px' }}>✕</button>
+                          </div>
+                        )}
+                        {!isOpen && (
+                          <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'flex-end' }}>
+                            <button onClick={() => deletePosition(p.id)} style={{ background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMute, padding: '4px 8px', fontFamily: serif, fontSize: '9px', cursor: 'pointer' }}>DELETE</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {view === 'backup' && (
+          <>
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '20px' }}>
+              <SectionHeader>◆ Export state</SectionHeader>
+              <div style={{ fontSize: '11px', color: colors.textDim, marginBottom: '14px', lineHeight: 1.6 }}>
+                Full JSON snapshot — settings, trades, positions, snapshots. State auto-persists in this browser's local storage; export is your portable backup, useful for moving between devices or as a periodic safety copy.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <button onClick={exportJSONFile} style={{ background: colors.gold, color: '#000', border: 'none', padding: '10px', fontFamily: serif, fontSize: '11px', letterSpacing: '0.15em', cursor: 'pointer', borderRadius: '2px', fontWeight: 600 }}>DOWNLOAD .JSON</button>
+                <button onClick={exportJSON} style={{ background: 'transparent', color: colors.gold, border: `1px solid ${colors.gold}`, padding: '10px', fontFamily: serif, fontSize: '11px', letterSpacing: '0.15em', cursor: 'pointer', borderRadius: '2px' }}>COPY TO CLIPBOARD</button>
+              </div>
+              {importResult?.payload && (
+                <textarea readOnly value={importResult.payload} style={{ width: '100%', marginTop: '12px', height: '160px', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: 'monospace', fontSize: '10px' }} />
+              )}
+            </div>
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px' }}>
+              <SectionHeader>◆ Import state</SectionHeader>
+              <div style={{ fontSize: '11px', color: colors.textDim, marginBottom: '14px', lineHeight: 1.6 }}>
+                Upload a previously-downloaded <code style={{ background: colors.bg, padding: '1px 4px', fontSize: '10px' }}>.json</code> file, or paste the payload manually. Overwrites trades, positions, snapshots, and settings.
+              </div>
+              <label style={{ display: 'block', marginBottom: '12px' }}>
+                <span style={{ display: 'inline-block', background: 'transparent', color: colors.textDim, border: `1px dashed ${colors.border}`, padding: '8px 14px', fontFamily: serif, fontSize: '10px', letterSpacing: '0.1em', cursor: 'pointer', borderRadius: '2px', textTransform: 'uppercase' }}>
+                  Choose .json file
+                </span>
+                <input type="file" accept="application/json,.json" onChange={(e) => importJSONFile(e.target.files?.[0])} style={{ display: 'none' }} />
+              </label>
+              <textarea value={importText} onChange={(e) => setImportText(e.target.value)} placeholder='{"version":13,...}' style={{ width: '100%', height: '140px', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: 'monospace', fontSize: '10px', marginBottom: '12px' }} />
+              <button onClick={importJSON} disabled={!importText.trim()} style={{ width: '100%', background: importText.trim() ? colors.green : colors.border, color: '#fff', border: 'none', padding: '10px', fontFamily: serif, fontSize: '11px', letterSpacing: '0.15em', cursor: importText.trim() ? 'pointer' : 'not-allowed', borderRadius: '2px', fontWeight: 600 }}>IMPORT JSON</button>
+              {importResult && (
+                <div style={{ marginTop: '12px', fontSize: '11px', color: importResult.ok ? colors.green : colors.red, padding: '8px 12px', border: `1px dashed ${importResult.ok ? colors.green : colors.red}` }}>
+                  {importResult.ok ? '✓ ' : '⚠ '}{importResult.msg}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {view === 'journal' && (
+          <>
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '20px' }}>
+              <SectionHeader>◆ Campaign progress</SectionHeader>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '12px', marginBottom: '16px' }}>
+                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Starting shares</div><input type="number" value={startingShares} onChange={(e) => setStartingShares(Number(e.target.value))} style={{ width: '100%', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.highlight, padding: '6px 10px', fontFamily: serif, fontSize: '15px', marginTop: '4px' }} /></div>
+                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Current shares</div><div style={{ color: colors.highlight, fontSize: '20px', marginTop: '4px', fontWeight: 600 }}>{journalStats.currentShares.toFixed(0)}</div></div>
+                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Δ shares</div><div style={{ color: journalStats.sharesDelta >= 0 ? colors.green : colors.red, fontSize: '20px', marginTop: '4px', fontWeight: 600 }}>{journalStats.sharesDelta >= 0 ? '+' : ''}{journalStats.sharesDelta.toFixed(0)} ({journalStats.sharesPct.toFixed(1)}%)</div></div>
+                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Net cash flow</div><div style={{ color: colors.highlight, fontSize: '15px', marginTop: '4px' }}>${journalStats.totalCash.toFixed(0)}</div></div>
+              </div>
+              <div style={{ paddingTop: '14px', borderTop: `1px solid ${colors.border}` }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '12px' }}>
+                  <div>
+                    <div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Rotation shares</div>
+                    <div style={{ color: journalStats.rotationShares >= 0 ? colors.green : colors.red, fontSize: '20px', marginTop: '4px', fontWeight: 600 }}>
+                      {journalStats.rotationShares >= 0 ? '+' : ''}{journalStats.rotationShares.toFixed(0)}
+                    </div>
+                    <div style={{ color: colors.textMute, fontSize: '10px', marginTop: '2px' }}>from {journalStats.completedRotations} completed rotation{journalStats.completedRotations !== 1 ? 's' : ''}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Avg per rotation</div>
+                    <div style={{ color: colors.highlight, fontSize: '20px', marginTop: '4px', fontWeight: 600 }}>
+                      {journalStats.completedRotations > 0 ? `+${(journalStats.rotationShares / journalStats.completedRotations).toFixed(1)}` : '—'}
+                    </div>
+                    <div style={{ color: colors.textMute, fontSize: '10px', marginTop: '2px' }}>shares per cycle</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '10px', color: colors.textMute, marginTop: '12px', lineHeight: 1.5, fontStyle: 'italic' }}>
+                  Rotation shares = cumulative SELL→BUY pair differences. Pairs match each SELL with the next BUY. Direct buys (no preceding SELL) count as accumulation, not rotation.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '20px' }}>
+              <SectionHeader>◆ Add trade</SectionHeader>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button onClick={() => setTradeType('SELL')} style={{ flex: 1, background: tradeType === 'SELL' ? colors.red : 'transparent', color: tradeType === 'SELL' ? '#fff' : colors.textDim, border: `1px solid ${tradeType === 'SELL' ? colors.red : colors.border}`, padding: '8px', fontFamily: serif, fontSize: '11px', letterSpacing: '0.1em', cursor: 'pointer' }}>SELL</button>
+                  <button onClick={() => setTradeType('BUY')} style={{ flex: 1, background: tradeType === 'BUY' ? colors.green : 'transparent', color: tradeType === 'BUY' ? '#fff' : colors.textDim, border: `1px solid ${tradeType === 'BUY' ? colors.green : colors.border}`, padding: '8px', fontFamily: serif, fontSize: '11px', letterSpacing: '0.1em', cursor: 'pointer' }}>BUY</button>
+                </div>
+                <input type="date" value={tradeDate} onChange={(e) => setTradeDate(e.target.value)} style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: serif, fontSize: '12px' }} />
+                <input type="number" placeholder="Shares" value={tradeShares} onChange={(e) => setTradeShares(e.target.value)} style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: serif, fontSize: '12px' }} />
+                <input type="number" placeholder="Price (USD)" value={tradePrice} onChange={(e) => setTradePrice(e.target.value)} style={{ background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: serif, fontSize: '12px' }} />
+                <input type="number" placeholder="Fees (USD, optional)" value={tradeFees} onChange={(e) => setTradeFees(e.target.value)} style={{ gridColumn: 'span 2', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: serif, fontSize: '12px' }} />
+              </div>
+              <button onClick={addTrade} style={{ width: '100%', background: colors.gold, color: colors.bg, border: 'none', padding: '10px', fontFamily: serif, fontSize: '12px', letterSpacing: '0.15em', textTransform: 'uppercase', cursor: 'pointer', fontWeight: 600 }}>+ Log trade</button>
+            </div>
+
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px' }}>
+              <SectionHeader>◆ Trade history</SectionHeader>
+              {trades.length === 0 ? <div style={{ color: colors.textFaint, fontSize: '12px', textAlign: 'center', padding: '20px 0' }}>No trades logged yet.</div>
+                : [...trades].sort((a, b) => b.date.localeCompare(a.date)).map(t => (
+                  <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '60px 1fr 1fr 1fr 30px', gap: '10px', padding: '10px 0', borderBottom: `1px solid ${colors.border}`, fontSize: '12px', alignItems: 'center' }}>
+                    <span style={{ color: t.type === 'SELL' ? colors.red : colors.green, fontWeight: 600, letterSpacing: '0.1em', fontSize: '10px' }}>{t.type}</span>
+                    <span style={{ color: colors.textDim }}>{t.date}</span>
+                    <span style={{ color: colors.text }}>{t.shares} sh</span>
+                    <span style={{ color: colors.gold }}>${t.price}</span>
+                    <button onClick={() => deleteTrade(t.id)} style={{ background: 'transparent', border: 'none', color: colors.textFaint, cursor: 'pointer', fontSize: '14px' }}>×</button>
+                  </div>
+                ))}
+            </div>
+          </>
+        )}
+
+        {view === 'snapshots' && (
+          <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px' }}>
+            <SectionHeader>◆ Signal evolution log</SectionHeader>
+            <div style={{ fontSize: '11px', color: colors.textDim, marginBottom: '16px', lineHeight: 1.6 }}>Save weekly snapshots. Trends matter more than any single reading.</div>
+            {snapshots.length === 0 ? <div style={{ color: colors.textFaint, fontSize: '12px', textAlign: 'center', padding: '20px 0' }}>No snapshots saved yet.</div>
+              : [...snapshots].reverse().map((s) => (
+                <div key={s.date} style={{ padding: '12px 0', borderBottom: `1px solid ${colors.border}`, fontSize: '11px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <span style={{ color: colors.textDim }}>{new Date(s.date).toLocaleDateString()} {new Date(s.date).toLocaleTimeString().slice(0,5)}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ color: modeCfg[s.mode]?.color || colors.gold, fontWeight: 600, fontSize: '10px', letterSpacing: '0.1em' }}>{s.mode}</span>
+                      <button onClick={() => deleteSnapshot(s.date)} style={{ background: 'transparent', border: 'none', color: colors.textFaint, cursor: 'pointer', fontSize: '14px' }}>×</button>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', color: colors.textMute, fontSize: '10px' }}>
+                    <span>MSTR ${s.mstrPrice?.toFixed(0)}</span>
+                    <span>BTC ${(s.btcPrice/1000).toFixed(0)}k</span>
+                    <span>mNAV {s.mNAV}x</span>
+                    <span>Bear {s.bearScore}</span>
+                    <span>Bottom {s.bottomScore}</span>
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
+
+        <div style={{ textAlign: 'center', marginTop: '32px', fontSize: '10px', color: colors.textFaint, letterSpacing: '0.15em' }}>
+          NOT FINANCIAL ADVICE · YOUR THESIS · YOUR CONVICTION · YOUR DECISION
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// APP ROOT (handles gate → tool transition)
+// =====================================================================
+function App() {
+  const [unlocked, setUnlocked] = useState(() => {
+    if (!AUTH_REQUIRED) return true;
+    try { return sessionStorage.getItem(AUTH_SESSION_KEY) === '1'; } catch (e) { return false; }
+  });
+
+  if (!unlocked) return <Gate onUnlock={() => setUnlocked(true)} />;
+  return <MSTRCycleTool />;
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
 </body>
 </html>
