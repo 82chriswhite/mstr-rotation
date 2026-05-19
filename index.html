@@ -4,24 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>MSTR Campaign Command Deck</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin="anonymous"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin></anonymous></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js" crossorigin="anonymous"></script>
-  <style>
-    body { margin: 0; padding: 0; background-color: #0a0806; -webkit-font-smoothing: antialiased; }
-    input, textarea, button { font-family: inherit; box-sizing: border-box; }
-  </style>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
 </head>
-<body>
+<body style="margin: 0; padding: 0; background-color: #0a0806;">
 
   <div id="mstr-app-root"></div>
 
   <script type="text/babel">
-    // Secure global browser storage mock configuration
-    const nativeStorage = {
-      get: async (key) => ({ value: window.localStorage.getItem(key) }),
-      set: async (key, val) => window.localStorage.setItem(key, val)
-    };
+    // 🚨 CRITICAL BROWSER-SAFE ENGINE MAPS (Prevents silent CDN Initialization Crashes)
+    const useState = React.useState;
+    const useEffect = React.useEffect;
+    const useMemo = React.useMemo;
 
     const colors = {
       bg: '#0a0806', panel: '#14100c', border: '#2a2520',
@@ -38,8 +33,14 @@
       hero:    { fontSize: '28px', color: colors.highlight, fontWeight: 600, letterSpacing: '-0.01em' },
     };
 
+    // Global client memory structure configuration
+    window.storage = {
+      get: async (key) => ({ value: localStorage.getItem(key) }),
+      set: async (key, val) => localStorage.setItem(key, val)
+    };
+
     function MSTRCycleTool() {
-      // Core state vectors
+      // Core states
       const [mstrPrice, setMstrPrice] = useState(164.77);
       const [btcPrice, setBtcPrice] = useState(76900);
       const [ma200, setMa200] = useState(229.54);
@@ -47,7 +48,7 @@
       const [pasteText, setPasteText] = useState('');
       const [pasteResult, setPasteResult] = useState(null);
 
-      // Technical thresholds
+      // Technical parameters
       const [high20, setHigh20] = useState(197.00);
       const [low20, setLow20] = useState(162.02);
       const [high50, setHigh50] = useState(224.50);
@@ -55,7 +56,7 @@
       const [low200, setLow200] = useState(104.17);
       const [atr14, setAtr14] = useState(13.00);
 
-      // Strategy profiles
+      // System indicators
       const [nupl, setNupl] = useState(28);
       const [mvrv, setMvrv] = useState(1.4);
       const [fundingNegative, setFundingNegative] = useState(true);
@@ -88,13 +89,11 @@
       const [tradePrice, setTradePrice] = useState('');
       const [tradeDate, setTradeDate] = useState(new Date().toISOString().slice(0, 10));
       const [tradeFees, setTradeFees] = useState('');
-      const [promptCopied, setPromptCopied] = useState(false);
 
-      // System IO state hooks
       useEffect(() => {
         const load = async () => {
           try {
-            const settings = await nativeStorage.get('mstr:settings');
+            const settings = await window.storage.get('mstr:settings');
             if (settings?.value) {
               const s = JSON.parse(settings.value);
               if (s.mstrPrice !== undefined) setMstrPrice(s.mstrPrice);
@@ -128,9 +127,9 @@
               if (s.aggressionStyle !== undefined) setAggressionStyle(s.aggressionStyle);
             }
           } catch (e) {}
-          try { const t = await nativeStorage.get('mstr:trades'); if (t?.value) setTrades(JSON.parse(t.value)); } catch (e) {}
-          try { const sn = await nativeStorage.get('mstr:snapshots'); if (sn?.value) setSnapshots(JSON.parse(sn.value)); } catch (e) {}
-          try { const pos = await nativeStorage.get('mstr:positions'); if (pos?.value) setPositions(JSON.parse(pos.value)); } catch (e) {}
+          try { const t = await window.storage.get('mstr:trades'); if (t?.value) setTrades(JSON.parse(t.value)); } catch (e) {}
+          try { const sn = await window.storage.get('mstr:snapshots'); if (sn?.value) setSnapshots(JSON.parse(sn.value)); } catch (e) {}
+          try { const pos = await window.storage.get('mstr:positions'); if (pos?.value) setPositions(JSON.parse(pos.value)); } catch (e) {}
         };
         load();
       }, []);
@@ -138,14 +137,8 @@
       useEffect(() => {
         const save = async () => {
           try {
-            await nativeStorage.set('mstr:settings', JSON.stringify({
-              mstrPrice, btcPrice, ma200, lastUpdated,
-              high20, low20, high50, low50, low200, atr14,
-              nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma,
-              weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares,
-              corporateBaseUpdated, startingShares, cashBuffer, gbpUsd,
-              levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh,
-              aggressionStyle,
+            await window.storage.set('mstr:settings', JSON.stringify({
+              mstrPrice, btcPrice, ma200, lastUpdated, high20, low20, high50, low50, low200, atr14, nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma, weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares, corporateBaseUpdated, startingShares, cashBuffer, gbpUsd, levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh, aggressionStyle,
             }));
           } catch (e) {}
         };
@@ -155,7 +148,6 @@
       const handleHoldingsChange = (v) => { setBtcHoldings(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
       const handleSharesChange = (v) => { setDilutedShares(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
 
-      // Math derivations
       const btcPerShare = useMemo(() => btcHoldings / (dilutedShares * 1_000_000), [btcHoldings, dilutedShares]);
       const fairValue = useMemo(() => btcPerShare * btcPrice, [btcPerShare, btcPrice]);
       const mNAV = useMemo(() => fairValue > 0 ? mstrPrice / fairValue : 0, [mstrPrice, fairValue]);
@@ -166,10 +158,7 @@
         return { totalDays, elapsed, remaining: Math.round((target - now) / 86400000), progress: Math.min(100, Math.max(0, (elapsed / totalDays) * 100)) };
       }, [lastUpdated]);
 
-      const daysSinceBaseUpdate = useMemo(() => {
-        if (!corporateBaseUpdated) return null;
-        return Math.floor((new Date() - new Date(corporateBaseUpdated)) / 86400000);
-      }, [corporateBaseUpdated, lastUpdated]);
+      const daysSinceBaseUpdate = useMemo(() => { if (!corporateBaseUpdated) return null; return Math.floor((new Date() - new Date(corporateBaseUpdated)) / 86400000); }, [corporateBaseUpdated, lastUpdated]);
 
       const profile = useMemo(() => {
         switch (aggressionStyle) {
@@ -179,12 +168,12 @@
         }
       }, [aggressionStyle]);
 
+      const technicals = useMemo(() => { if (high20 === null || low20 === null || atr14 === null) return null; return { high20, low20, high50, low50, low200, atr14 }; }, [high20, low20, high50, low50, low200, atr14]);
+
       const dynamicLevels = useMemo(() => {
-        if (!technicals) return null;
-        const { high20, low20, atr14 } = technicals; const current = mstrPrice;
+        if (!technicals) return null; const { high20, low20, atr14 } = technicals; const current = mstrPrice;
         const rotateSellTarget = Math.max(high20, current + atr14); const rotateBuyTarget = Math.min(low20, current - atr14); const bandWidth = atr14 * profile.bandWidthMult;
         const hoardBuyAnchor = ma200 ? ma200 * 0.85 : current - atr14 * 2; const hoardBuyDeep = ma200 ? ma200 * 0.75 : current - atr14 * 3;
-
         return {
           rotate: { sellLow: rotateSellTarget - bandWidth, sellHigh: rotateSellTarget + bandWidth, buyLow: rotateBuyTarget - bandWidth, buyHigh: rotateBuyTarget + bandWidth },
           hoard: { sellLow: current + atr14 * 0.5, sellHigh: Math.max(high20, current + atr14 * 1.5), buyTarget: current - (current - hoardBuyAnchor) / profile.hoardSensitivity, buyDeepTarget: current - (current - hoardBuyDeep) / profile.hoardSensitivity },
@@ -192,15 +181,10 @@
         };
       }, [technicals, ma200, mstrPrice, profile]);
 
-      const bearScore = useMemo(() => {
-        let s = 0; if (btcPrice < 72500) s += 2; if (btcPrice < 60000) s += 2; if (nupl < 0) s += 2; if (mvrv < 1.0) s += 1; if (fundingNegative) s += 1; if (below200ma) s += 2; if (weeklyLowerLow) s += 1; if (dxyAbove110) s += 1; if (cycleData.remaining > 0 && cycleData.remaining < 180) s += 1; return s;
-      }, [btcPrice, nupl, mvrv, fundingNegative, below200ma, weeklyLowerLow, dxyAbove110, cycleData]);
-
-      const bottomScore = useMemo(() => {
-        let s = 0; if (mstrPrice < 120) s += 2; if (mstrPrice < 90) s += 2; if (btcPrice < 55000) s += 2; if (btcPrice < 45000) s += 2; if (nupl < -25) s += 3; if (mvrv < 0.8) s += 3; if (derivativesExhaustion) s += 2; if (Math.abs(cycleData.remaining) < 60) s += 2; return s;
-      }, [mstrPrice, btcPrice, nupl, mvrv, derivativesExhaustion, cycleData]);
-
+      const bearScore = useMemo(() => { let s = 0; if (btcPrice < 72500) s += 2; if (btcPrice < 60000) s += 2; if (nupl < 0) s += 2; if (mvrv < 1.0) s += 1; if (fundingNegative) s += 1; if (below200ma) s += 2; if (weeklyLowerLow) s += 1; if (dxyAbove110) s += 1; if (cycleData.remaining > 0 && cycleData.remaining < 180) s += 1; return s; }, [btcPrice, nupl, mvrv, fundingNegative, below200ma, weeklyLowerLow, dxyAbove110, cycleData]);
+      const bottomScore = useMemo(() => { let s = 0; if (mstrPrice < 120) s += 2; if (mstrPrice < 90) s += 2; if (btcPrice < 55000) s += 2; if (btcPrice < 45000) s += 2; if (nupl < -25) s += 3; if (mvrv < 0.8) s += 3; if (derivativesExhaustion) s += 2; if (Math.abs(cycleData.remaining) < 60) s += 2; return s; }, [mstrPrice, btcPrice, nupl, mvrv, derivativesExhaustion, cycleData]);
       const mode = useMemo(() => { if (bottomScore >= 7 && mstrPrice < 140) return 'DEPLOY'; if (bearScore >= 6) return 'HOARD'; return 'ROTATE'; }, [bearScore, bottomScore, mstrPrice]);
+
       const currentLevels = useMemo(() => {
         if (!levelsAuto || !dynamicLevels) return { rotate: { sell: fmtRange(manualSellLow, manualSellHigh), buy: fmtRange(manualBuyLow, manualBuyHigh) }, hoard: { sell: fmtRange(manualSellLow, manualSellHigh), buy: `Wait — target ${fmt(manualBuyLow * 0.7)}` }, deploy: { sell: 'Do not sell', buy: 'Ladder every 10% drop' } }[mode.toLowerCase()];
         const d = dynamicLevels; return { rotate: { sell: fmtRange(d.rotate.sellLow, d.rotate.sellHigh), buy: fmtRange(d.rotate.buyLow, d.rotate.buyHigh) }, hoard: { sell: fmtRange(d.hoard.sellLow, d.hoard.sellHigh), buy: `Wait — target ${fmt(d.hoard.buyTarget)} / deep ${fmt(d.hoard.buyDeepTarget)}` }, deploy: { sell: 'Do not sell', buy: `Ladder: ${d.deploy.ladder.map(l => fmt(l.level)).join(' · ')}` } }[mode.toLowerCase()];
@@ -211,7 +195,6 @@
         const d = dynamicLevels; return { rotate: { sellAlert: d.rotate.sellLow, buyAlert: d.rotate.buyHigh }, hoard: { sellAlert: d.hoard.sellLow, buyAlert: d.hoard.buyTarget, buyDeepAlert: d.hoard.buyDeepTarget }, deploy: { sellAlert: null, ladder: d.deploy.ladder.map(r => r.level) } };
       }, [levelsAuto, dynamicLevels, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
 
-      // Execution strategies dictionary configuration mapped prior to state instantiation
       const modeCfg = {
         ROTATE: { label: 'NORMAL ROTATION', color: '#d4a017', bg: '#1a1611', action: 'Sell at resistance, buy back at support.', cash: '0–25%' },
         HOARD:  { label: 'CASH HOARD',      color: '#c73e1d', bg: '#1a0f0d', action: 'Sell at resistance. Do NOT buy back. Wait for deeper levels.', cash: '40–70%' },
@@ -478,8 +461,9 @@
       );
     }
 
+    // 🚨 STABLE REACT 18 INJECTION ROOT TRIGGER
     const root = ReactDOM.createRoot(document.getElementById('mstr-app-root'));
-    root.render(<MSTRCycleTool />);
+    root.render(React.createElement(MSTRCycleTool));
   </script>
 </body>
 </html>
