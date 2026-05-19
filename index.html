@@ -15,6 +15,14 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
+    // Fixed internal colors baseline dictionary to prevent rendering crashes
+    const colors = {
+      bg: '#0a0806', panel: '#14100c', border: '#2a2520',
+      text: '#d4c8b8', textDim: '#a89580', textMute: '#8a7a65', textFaint: '#5a5048',
+      gold: '#d4a017', red: '#c73e1d', green: '#2d8659', highlight: '#e8dcc8',
+    };
+    const serif = 'Georgia, "Times New Roman", serif';
+
     // Standard local storage fallback structure for direct browser routing
     window.storage = {
       get: async (key) => ({ value: localStorage.getItem(key) }),
@@ -293,6 +301,7 @@
         };
       }, [levelsAuto, dynamicLevels, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
 
+      // ============ MOVED DICTIONARIES UP HERE TO AVOID REFERENCE ERRORS ============
       const modeCfg = {
         ROTATE: { label: 'NORMAL ROTATION', color: '#d4a017', bg: '#1a1611', action: 'Sell at resistance, buy back at support.', cash: '0–25%' },
         HOARD:  { label: 'CASH HOARD',      color: '#c73e1d', bg: '#1a0f0d', action: 'Sell at resistance. Do NOT buy back. Wait for deeper levels.', cash: '40–70%' },
@@ -361,7 +370,7 @@
         return { positionUSD, positionGBP, totalGBP, cashPct, positionPct: 100 - cashPct };
       }, [journalStats.currentShares, mstrPrice, gbpUsd, cashBuffer]);
 
-      const claudePrompt = `Please web-search data and return values...`;
+      const claudePrompt = `Please web-search data and return values in code block.`;
       const copyPrompt = async () => { try { await navigator.clipboard.writeText(claudePrompt); setPromptCopied(true); setTimeout(() => setPromptCopied(false), 2000); } catch (e) {} };
 
       const applyPaste = () => {
@@ -393,7 +402,8 @@
             case 'DXY_ABOVE_110': setDxyAbove110(boolVal); break;
           }
         }
-        setLastUpdated(new Date().toISOString().slice(0, 10)); setPasteText('');
+        setLastUpdated(new Date().toISOString().slice(0, 10)); setPasteResult({ ok: true, msg: 'Telemetry synced successfully.' }); setPasteText('');
+        setTimeout(() => setPasteResult(null), 4000);
       };
 
       const saveSnapshot = () => { setSnapshots([...snapshots, { date: new Date().toISOString(), mstrPrice, btcPrice, nupl, mvrv, mNAV: Number(mNAV.toFixed(2)), bearScore, bottomScore, mode }]); };
@@ -420,11 +430,13 @@
         }}>{label}</button>
       );
 
+      const staleColor = !daysSinceBaseUpdate && daysSinceBaseUpdate !== 0 ? colors.textFaint : daysSinceBaseUpdate > 60 ? colors.red : daysSinceBaseUpdate > 30 ? colors.gold : colors.textMute;
+
       return (
         <div style={{ minHeight: '100vh', background: `linear-gradient(180deg, ${colors.bg} 0%, ${colors.panel} 100%)`, padding: '24px 16px', fontFamily: serif, color: colors.text }}>
           <div style={{ maxWidth: '720px', margin: '0 auto' }}>
             <div style={{ marginBottom: '24px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '20px' }}>
-              <div style={t.eyebrow}>Cycle Decision Framework · v13.1</div>
+              <div style={t.eyebrow}>Cycle Decision Framework · v13.2</div>
               <h1 style={{ fontSize: '26px', color: colors.highlight, margin: '8px 0 0 0', fontStyle: 'italic', fontWeight: 400 }}>MSTR Rotation</h1>
               <div style={{ display: 'flex', gap: '20px', fontSize: '12px', marginTop: '12px', flexWrap: 'wrap' }}>
                 <div><span style={{color:colors.textMute}}>BTC </span><span style={{color:colors.gold}}>${btcPrice.toLocaleString()}</span></div>
@@ -456,7 +468,7 @@
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <div style={t.eyebrow}>MSTR Close</div>
-                      <div style={t.hero}>${mstrPrice.toFixed(2)}</div>
+                      <div style={{ ...t.hero, color: priceRange?.tone || colors.highlight }}>${mstrPrice.toFixed(2)}</div>
                       {priceRange?.verdict && <div style={{ ...t.eyebrow, color: priceRange.tone, marginTop: '4px', fontWeight: 600 }}>{priceRange.verdict}</div>}
                     </div>
                   </div>
@@ -464,4 +476,130 @@
                   {priceRange?.pct !== null && mode === 'ROTATE' && (
                     <div style={{ marginBottom: '18px' }}>
                       <div style={{ position: 'relative', height: '6px', background: '#0a0806', borderRadius: '3px', border: `1px solid ${colors.border}` }}>
-                        <div style={{ position: 'absolute', left: `${priceRange.pct * 100}%`, top: '-3px', width: '
+                        <div style={{ position: 'absolute', left: `${priceRange.pct * 100}%`, top: '-3px', width: '2px', height: '12px', background: priceRange.tone }} />
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ ...t.body, marginBottom: '18px' }}>{cfg.action}</div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', paddingTop: '16px', borderTop: `1px solid ${colors.border}` }}>
+                    <div>
+                      <div style={t.eyebrow}>Sell zone</div>
+                      <div style={t.value}>{currentLevels.sell}</div>
+                      {alertLevels[mode.toLowerCase()]?.sellAlert && <div style={{ ...t.eyebrow, color: colors.gold, marginTop: '4px' }}>Alert ${alertLevels[mode.toLowerCase()].sellAlert.toFixed(2)}</div>}
+                    </div>
+                    <div>
+                      <div style={t.eyebrow}>Buy zone</div>
+                      <div style={t.value}>{currentLevels.buy}</div>
+                      {mode === 'ROTATE' && alertLevels.rotate?.buyAlert && <div style={{ ...t.eyebrow, color: colors.gold, marginTop: '4px' }}>Alert ${alertLevels.rotate.buyAlert.toFixed(2)}</div>}
+                      {mode === 'HOARD' && alertLevels.hoard?.buyAlert && <div style={{ ...t.eyebrow, color: colors.gold, marginTop: '4px' }}>Alert ${alertLevels.hoard.buyAlert.toFixed(2)}</div>}
+                    </div>
+                    <div>
+                      <div style={t.eyebrow}>Cash hold</div>
+                      <div style={t.value}>{cfg.cash}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '20px', paddingTop: '14px', borderTop: `1px solid ${colors.border}` }}>
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      {['conservative', 'moderate', 'aggressive'].map(s => (
+                        <button key={s} onClick={() => setAggressionStyle(s)} style={{ background: aggressionStyle === s ? cfg.color : 'transparent', color: aggressionStyle === s ? '#000' : colors.textDim, border: `1px solid ${colors.border}`, padding: '4px 8px', fontSize: '10px', textTransform: 'uppercase', cursor: 'pointer', borderRadius: '2px' }}>{s.slice(0,3)}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* TELEMETRY PASTING PORTAL */}
+                <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
+                  <div style={t.value}>System Data Payload Upload</div>
+                  <textarea value={pasteText} onChange={(e)=>setPasteText(e.target.value)} placeholder="Paste machine readout text block straight into here..." style={{ width: '100%', height: '100px', background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, marginTop: '8px', padding: '10px', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: '11px' }} />
+                  <button onClick={applyPaste} style={{ width: '100%', padding: '12px', background: colors.green, color: '#fff', border: 'none', fontWeight: 600, marginTop: '8px', cursor: 'pointer', letterSpacing: '0.05em' }}>APPLY TELEMETRY ARRAY</button>
+                  {pasteResult && <div style={{ marginTop: '8px', color: colors.green, fontSize: '11px' }}>{pasteResult.msg}</div>}
+                </div>
+              </>
+            )}
+
+            {view === 'positions' && (
+              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
+                <div style={sectionHeader}>◆ Active Order Position Book</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+                  <input type="number" placeholder="Shares" value={positionForm.shares} onChange={(e)=>setPositionForm({...positionForm, shares:e.target.value})} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px', fontFamily: serif }} />
+                  <input type="number" placeholder="Entry Price" value={positionForm.entryPrice} onChange={(e)=>setPositionForm({...positionForm, entryPrice:e.target.value})} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px', fontFamily: serif }} />
+                </div>
+                <button onClick={openPosition} style={{ width: '100%', padding: '12px', background: colors.gold, color: '#0a0806', border: 'none', fontWeight: 600, cursor: 'pointer' }}>INITIALIZE POSITION RECORD</button>
+                
+                <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {positions.map(p => p.status === 'OPEN' && (
+                    <div key={p.id} style={{ padding: '12px', background: colors.bg, border: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={t.body}>{p.shares} sh @ ${p.entryPrice.toFixed(2)} <span style={{fontSize:'10px', color:colors.textMute}}>({p.tag})</span></div>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <input type="number" placeholder="Exit Price" value={exitPrices[p.id] ?? ''} onChange={(e)=>setExitPrices({...exitPrices, [p.id]: e.target.value})} style={{ width: '80px', background: colors.panel, color: colors.text, border: `1px solid ${colors.border}`, padding: '4px' }} />
+                        <button onClick={()=> { if(exitPrices[p.id]) { closePosition(p.id, exitPrices[p.id]); } else { closePosition(p.id, mstrPrice); } }} style={{ background: colors.red, color: '#fff', border: 'none', padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>CLOSE</button>
+                        <button onClick={()=>deletePosition(p.id)} style={{ background: 'transparent', border: `1px solid ${colors.border}`, color: colors.textMute, padding: '4px', cursor: 'pointer' }}>✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {view === 'journal' && (
+              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
+                <div style={sectionHeader}>◆ Trade Execution Journal</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+                  <input type="number" placeholder="Shares" value={tradeShares} onChange={(e)=>setTradeShares(e.target.value)} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px' }} />
+                  <input type="number" placeholder="Price" value={tradePrice} onChange={(e)=>setTradePrice(e.target.value)} style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, padding: '10px' }} />
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+                  <button onClick={()=>setTradeType('BUY')} style={{ flex: 1, padding: '10px', background: tradeType === 'BUY' ? colors.green : 'transparent', color: '#fff', border: `1px solid ${colors.green}` }}>BUY</button>
+                  <button onClick={()=>setTradeType('SELL')} style={{ flex: 1, padding: '10px', background: tradeType === 'SELL' ? colors.red : 'transparent', color: '#fff', border: `1px solid ${colors.red}` }}>SELL</button>
+                </div>
+                <button onClick={addTrade} style={{ width: '100%', padding: '12px', background: colors.gold, color: '#000', border: 'none', fontWeight: 600 }}>LOG DIRECT JOURNAL TRANSACTION</button>
+
+                <div style={{ marginTop: '20px' }}>
+                  {[...trades].reverse().map(t => (
+                    <div key={t.id} style={{ padding: '8px 0', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                      <span style={{ color: t.type === 'SELL' ? colors.red : colors.green, fontWeight: 600 }}>{t.type}</span>
+                      <span>{t.shares} sh</span>
+                      <span style={{ color: colors.gold }}>${t.price}</span>
+                      <button onClick={()=>deleteTrade(t.id)} style={{ background: 'transparent', border: 'none', color: colors.textFaint, cursor: 'pointer' }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {view === 'snapshots' && (
+              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
+                <div style={sectionHeader}>◆ System Evolution Log</div>
+                {[...snapshots].reverse().map((s, idx) => (
+                  <div key={idx} style={{ padding: '10px 0', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                    <span style={{ color: colors.textDim }}>{s.date}</span>
+                    <span style={{ fontWeight: 600, color: colors.gold }}>{s.mode}</span>
+                    <span>MSTR: ${s.mstrPrice}</span>
+                    <span>mNAV: {s.mNAV}x</span>
+                    <button onClick={()=>deleteSnapshot(s.date)} style={{ background: 'transparent', border: 'none', color: colors.textFaint, cursor: 'pointer' }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {view === 'backup' && (
+              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', borderRadius: '4px' }}>
+                <div style={sectionHeader}>◆ Portable Sovereign State Ledger</div>
+                <button onClick={exportJSON} style={{ width: '100%', padding: '12px', background: colors.gold, color: '#000', border: 'none', fontWeight: 600, cursor: 'pointer' }}>EXPORT COMPACT SYSTEM TO CLIPBOARD</button>
+                <textarea value={importText} onChange={(e)=>setImportText(e.target.value)} placeholder="Paste your exported configuration string here..." style={{ width: '100%', height: '120px', background: colors.bg, color: colors.text, border: `1px solid ${colors.border}`, marginTop: '16px', padding: '10px', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: '10px' }} />
+                <button onClick={importJSON} style={{ width: '100%', padding: '12px', background: colors.green, color: '#fff', border: 'none', marginTop: '8px', fontWeight: 600, cursor: 'pointer' }}>RESTORE IMPORT VECTOR</button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('mstr-app-root'));
+    root.render(<MSTRCycleTool />);
+  </script>
+</body>
+</html>
