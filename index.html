@@ -8,15 +8,15 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
-<body style="margin:0; background-color:#0a0806;">
+<body style="margin: 0; background-color: #0a0806;">
 
   <div id="mstr-app-root"></div>
 
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // mock storage structure for standard browser environments
-    window.storage = window.storage || {
+    // Standard local storage fallback structure for direct browser routing
+    window.storage = {
       get: async (key) => ({ value: localStorage.getItem(key) }),
       set: async (key, val) => localStorage.setItem(key, val)
     };
@@ -50,18 +50,24 @@
       const [dilutedShares, setDilutedShares] = useState(280);
       const [corporateBaseUpdated, setCorporateBaseUpdated] = useState(null);
       const [startingShares, setStartingShares] = useState(211);
-      const [cashBuffer, setCashBuffer] = useState(0);
-      const [gbpUsd, setGbpUsd] = useState(1.27);
+      const [cashBuffer, setCashBuffer] = useState(0);  
+      const [gbpUsd, setGbpUsd] = useState(1.27);       
 
+      // Level overrides (persisted)
       const [levelsAuto, setLevelsAuto] = useState(true);
       const [manualSellLow, setManualSellLow] = useState(192);
       const [manualSellHigh, setManualSellHigh] = useState(200);
       const [manualBuyLow, setManualBuyLow] = useState(170);
       const [manualBuyHigh, setManualBuyHigh] = useState(180);
 
+      // Journal/snapshots
       const [trades, setTrades] = useState([]);
       const [snapshots, setSnapshots] = useState([]);
-      const [aggressionStyle, setAggressionStyle] = useState('moderate');
+
+      // ============ AGGRESSION PROFILE (persisted) ============
+      const [aggressionStyle, setAggressionStyle] = useState('moderate'); 
+
+      // ============ ACTIVE POSITIONS (persisted) ============
       const [positions, setPositions] = useState([]);
       const [positionForm, setPositionForm] = useState({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' });
       const [exitPrices, setExitPrices] = useState({});
@@ -169,17 +175,11 @@
       const profile = useMemo(() => {
         switch (aggressionStyle) {
           case 'conservative':
-            return {
-              label: 'Conservative', rotationSizePctLow: 15, rotationSizePctHigh: 20, bandWidthMult: 0.55, hoardSensitivity: 1.15, deployLadderSteepness: 0.9, note: 'Wider bands, smaller rotations, quicker to HOARD.',
-            };
+            return { label: 'Conservative', rotationSizePctLow: 15, rotationSizePctHigh: 20, bandWidthMult: 0.55, hoardSensitivity: 1.15, deployLadderSteepness: 0.9, note: 'Wider bands, smaller rotations, quicker to HOARD.' };
           case 'aggressive':
-            return {
-              label: 'Aggressive', rotationSizePctLow: 35, rotationSizePctHigh: 45, bandWidthMult: 0.28, hoardSensitivity: 0.85, deployLadderSteepness: 1.15, note: 'Tighter bands, larger rotations, holds ROTATE longer.',
-            };
+            return { label: 'Aggressive', rotationSizePctLow: 35, rotationSizePctHigh: 45, bandWidthMult: 0.28, hoardSensitivity: 0.85, deployLadderSteepness: 1.15, note: 'Tighter bands, larger rotations, holds ROTATE longer.' };
           default:
-            return {
-              label: 'Moderate (Base)', rotationSizePctLow: 25, rotationSizePctHigh: 30, bandWidthMult: 0.4, hoardSensitivity: 1.0, deployLadderSteepness: 1.0, note: 'Balanced — base case per the playbook.',
-            };
+            return { label: 'Moderate (Base)', rotationSizePctLow: 25, rotationSizePctHigh: 30, bandWidthMult: 0.4, hoardSensitivity: 1.0, deployLadderSteepness: 1.0, note: 'Balanced — base case per the playbook.' };
         }
       }, [aggressionStyle]);
 
@@ -304,9 +304,7 @@
 
       const bandHits = useMemo(() => {
         if (!dynamicLevels) return [];
-        const hits = [];
-        const d = dynamicLevels;
-        const p = mstrPrice;
+        const hits = []; const d = dynamicLevels; const p = mstrPrice;
         if (mode === 'ROTATE') {
           if (p >= d.rotate.sellLow && p <= d.rotate.sellHigh) { hits.push({ tag: 'ROTATE-SELL', side: 'SELL', label: 'ROTATE sell zone hit', zone: `${fmt(d.rotate.sellLow)}–${fmt(d.rotate.sellHigh)}`, price: p }); }
           if (p >= d.rotate.buyLow && p <= d.rotate.buyHigh) { hits.push({ tag: 'ROTATE-BUY', side: 'BUY', label: 'ROTATE buy zone hit', zone: `${fmt(d.rotate.buyLow)}–${fmt(d.rotate.buyHigh)}`, price: p }); }
@@ -329,22 +327,18 @@
       const priceRange = useMemo(() => {
         if (!dynamicLevels) return null;
         const RED = '#c73e1d', GREEN = '#2d8659', GOLD = '#d4a017';
-        const p = mstrPrice;
-        const d = dynamicLevels;
-
+        const p = mstrPrice; const d = dynamicLevels;
         if (mode === 'ROTATE') {
           const lo = d.rotate.buyLow; const hi = d.rotate.sellHigh; const span = hi - lo;
           const pct = span > 0 ? Math.max(0, Math.min(1, (p - lo) / span)) : 0.5;
           const inSell = p >= d.rotate.sellLow; const inBuy = p <= d.rotate.buyHigh;
-          const verdict = inSell ? 'IN SELL ZONE' : inBuy ? 'IN BUY ZONE' : 'BETWEEN BANDS';
-          return { pct, verdict, tone: inSell ? RED : inBuy ? GREEN : GOLD, lo, hi, buyLow: d.rotate.buyLow, buyHigh: d.rotate.buyHigh, sellLow: d.rotate.sellLow, sellHigh: d.rotate.sellHigh };
+          return { pct, verdict: inSell ? 'IN SELL ZONE' : inBuy ? 'IN BUY ZONE' : 'BETWEEN BANDS', tone: inSell ? RED : inBuy ? GREEN : GOLD, lo, hi, buyLow: d.rotate.buyLow, buyHigh: d.rotate.buyHigh, sellLow: d.rotate.sellLow, sellHigh: d.rotate.sellHigh };
         }
         if (mode === 'HOARD') {
           const target = d.hoard.buyTarget; const deep = d.hoard.buyDeepTarget;
           const pctToTarget = ((p / target) - 1) * 100;
           const inSell = p >= d.hoard.sellLow; const atTarget = p <= target * 1.015;
-          const verdict = inSell ? 'IN SELL ZONE' : atTarget ? 'AT BUY TARGET' : `${pctToTarget > 0 ? '+' : ''}${pctToTarget.toFixed(1)}% vs target`;
-          return { pct: null, verdict, tone: inSell ? RED : atTarget ? GREEN : GOLD, target, deep, sellLow: d.hoard.sellLow, sellHigh: d.hoard.sellHigh };
+          return { pct: null, verdict: inSell ? 'IN SELL ZONE' : atTarget ? 'AT BUY TARGET' : `${pctToTarget > 0 ? '+' : ''}${pctToTarget.toFixed(1)}% vs target`, tone: inSell ? RED : atTarget ? GREEN : GOLD, target, deep, sellLow: d.hoard.sellLow, sellHigh: d.hoard.sellHigh };
         }
         const liveRungs = d.deploy.ladder.filter(r => p <= r.level * 1.015);
         return { pct: null, verdict: liveRungs.length > 0 ? `${liveRungs.length}/4 RUNGS LIVE` : 'ABOVE LADDER', tone: GREEN, ladder: d.deploy.ladder };
@@ -355,14 +349,8 @@
         const sorted = [...trades].sort((a, b) => a.date.localeCompare(b.date));
         sorted.forEach(t => {
           const gross = t.shares * t.price;
-          if (t.type === 'SELL') {
-            currentShares -= t.shares; totalCash += gross - (t.fees || 0); openSell = { shares: t.shares, price: t.price };
-          } else {
-            currentShares += t.shares; totalCash -= gross + (t.fees || 0);
-            if (openSell) {
-              rotationShares += (t.shares - openSell.shares); completedRotations += 1; openSell = null;
-            }
-          }
+          if (t.type === 'SELL') { currentShares -= t.shares; totalCash += gross - (t.fees || 0); openSell = { shares: t.shares, price: t.price }; }
+          else { currentShares += t.shares; totalCash -= gross + (t.fees || 0); if (openSell) { rotationShares += (t.shares - openSell.shares); completedRotations += 1; openSell = null; } }
         });
         return { currentShares, totalCash, sharesDelta: currentShares - startingShares, sharesPct: startingShares > 0 ? ((currentShares - startingShares) / startingShares) * 100 : 0, rotationShares, completedRotations, tradeCount: trades.length };
       }, [trades, startingShares]);
@@ -380,26 +368,24 @@
         if (!pasteText.trim()) return;
         let text = pasteText.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
         const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-        const applied = []; const skipped = [];
         for (const line of lines) {
-          const m = line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/);
-          if (!m) continue;
+          const m = line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/); if (!m) continue;
           const key = m[1].toUpperCase(); const val = m[2].trim();
           const numVal = parseFloat(val.replace(/[$,%]/g, '')); const boolVal = /^on$|^true$|^yes$|^1$/i.test(val);
           switch (key) {
-            case 'MSTR_PRICE': if (!isNaN(numVal)) { setMstrPrice(numVal); applied.push(`MSTR $${numVal}`); } break;
-            case 'MSTR_200MA': if (!isNaN(numVal)) { setMa200(numVal); applied.push(`200MA $${numVal}`); } break;
-            case 'MSTR_20D_HIGH': if (!isNaN(numVal)) { setHigh20(numVal); applied.push(`20dH $${numVal}`); } break;
-            case 'MSTR_20D_LOW': if (!isNaN(numVal)) { setLow20(numVal); applied.push(`20dL $${numVal}`); } break;
-            case 'MSTR_50D_HIGH': if (!isNaN(numVal)) { setHigh50(numVal); applied.push(`50dH $${numVal}`); } break;
-            case 'MSTR_50D_LOW': if (!isNaN(numVal)) { setLow50(numVal); applied.push(`50dL $${numVal}`); } break;
-            case 'MSTR_200D_LOW': if (!isNaN(numVal)) { setLow200(numVal); applied.push(`200dL $${numVal}`); } break;
-            case 'MSTR_ATR14': if (!isNaN(numVal)) { setAtr14(numVal); applied.push(`ATR ${numVal}`); } break;
-            case 'BTC_PRICE': if (!isNaN(numVal)) { setBtcPrice(numVal); applied.push(`BTC $${numVal}`); } break;
-            case 'NUPL': if (!isNaN(numVal)) { setNupl(numVal); applied.push(`NUPL ${numVal}%`); } break;
-            case 'MVRV': if (!isNaN(numVal)) { setMvrv(numVal); applied.push(`MVRV ${numVal}`); } break;
-            case 'BTC_HOLDINGS': if (!isNaN(numVal)) { handleHoldingsChange(numVal); applied.push(`Holdings ${numVal}`); } break;
-            case 'DILUTED_SHARES': if (!isNaN(numVal)) { const shares = numVal > 10000 ? numVal / 1000000 : numVal; handleSharesChange(shares); applied.push(`Shares ${shares}M`); } break;
+            case 'MSTR_PRICE': if (!isNaN(numVal)) setMstrPrice(numVal); break;
+            case 'MSTR_200MA': if (!isNaN(numVal)) setMa200(numVal); break;
+            case 'MSTR_20D_HIGH': if (!isNaN(numVal)) setHigh20(numVal); break;
+            case 'MSTR_20D_LOW': if (!isNaN(numVal)) setLow20(numVal); break;
+            case 'MSTR_50D_HIGH': if (!isNaN(numVal)) setHigh50(numVal); break;
+            case 'MSTR_50D_LOW': if (!isNaN(numVal)) setLow50(numVal); break;
+            case 'MSTR_200D_LOW': if (!isNaN(numVal)) setLow200(numVal); break;
+            case 'MSTR_ATR14': if (!isNaN(numVal)) setAtr14(numVal); break;
+            case 'BTC_PRICE': if (!isNaN(numVal)) setBtcPrice(numVal); break;
+            case 'NUPL': if (!isNaN(numVal)) setNupl(numVal); break;
+            case 'MVRV': if (!isNaN(numVal)) setMvrv(numVal); break;
+            case 'BTC_HOLDINGS': if (!isNaN(numVal)) handleHoldingsChange(numVal); break;
+            case 'DILUTED_SHARES': if (!isNaN(numVal)) { const shares = numVal > 10000 ? numVal / 1000000 : numVal; handleSharesChange(shares); } break;
             case 'BELOW_200MA': setBelow200ma(boolVal); break;
             case 'WEEKLY_LL': setWeeklyLowerLow(boolVal); break;
             case 'SHORTING': setFundingNegative(boolVal); break;
@@ -407,34 +393,16 @@
             case 'DXY_ABOVE_110': setDxyAbove110(boolVal); break;
           }
         }
-        setLastUpdated(new Date().toISOString().slice(0, 10));
-        setPasteText('');
+        setLastUpdated(new Date().toISOString().slice(0, 10)); setPasteText('');
       };
 
-      const saveSnapshot = () => {
-        const snap = { date: new Date().toISOString(), mstrPrice, btcPrice, nupl, mvrv, mNAV: Number(mNAV.toFixed(2)), bearScore, bottomScore, mode };
-        setSnapshots([...snapshots, snap]);
-      };
-
-      const addTrade = () => {
-        if (!tradeShares || !tradePrice) return;
-        const trade = { id: Date.now(), date: tradeDate, type: tradeType, shares: parseFloat(tradeShares), price: parseFloat(tradePrice), fees: parseFloat(tradeFees) || 0 };
-        setTrades([...trades, trade]);
-        setTradeShares(''); setTradePrice('');
-      };
-
-      const openPosition = () => {
-        if (!positionForm.shares || !positionForm.entryPrice) return;
-        const pos = { id: Date.now(), openedAt: new Date().toISOString(), shares: parseFloat(positionForm.shares), entryPrice: parseFloat(positionForm.entryPrice), stop: positionForm.stop ? parseFloat(positionForm.stop) : null, target: positionForm.target ? parseFloat(positionForm.target) : null, tag: positionForm.tag || 'MANUAL', notes: positionForm.notes || '', status: 'OPEN' };
-        setPositions([...positions, pos]);
-        setPositionForm({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' });
-      };
-
-      const closePosition = (id, exitPrice) => {
-        const pos = positions.find(p => p.id === id); if (!pos) return;
-        setPositions(positions.map(p => p.id === id ? { ...p, status: 'CLOSED', closedAt: new Date().toISOString(), exitPrice: parseFloat(exitPrice) } : p));
-        setTrades([...trades, { id: Date.now(), date: new Date().toISOString().slice(0, 10), type: 'SELL', shares: pos.shares, price: parseFloat(exitPrice), fees: 0, fromPositionId: id }]);
-      };
+      const saveSnapshot = () => { setSnapshots([...snapshots, { date: new Date().toISOString(), mstrPrice, btcPrice, nupl, mvrv, mNAV: Number(mNAV.toFixed(2)), bearScore, bottomScore, mode }]); };
+      const addTrade = () => { if (!tradeShares || !tradePrice) return; setTrades([...trades, { id: Date.now(), date: tradeDate, type: tradeType, shares: parseFloat(tradeShares), price: parseFloat(tradePrice), fees: parseFloat(tradeFees) || 0 }]); setTradeShares(''); setTradePrice(''); };
+      const openPosition = () => { if (!positionForm.shares || !positionForm.entryPrice) return; setPositions([...positions, { id: Date.now(), openedAt: new Date().toISOString(), shares: parseFloat(positionForm.shares), entryPrice: parseFloat(positionForm.entryPrice), stop: positionForm.stop ? parseFloat(positionForm.stop) : null, target: positionForm.target ? parseFloat(positionForm.target) : null, tag: positionForm.tag || 'MANUAL', notes: positionForm.notes || '', status: 'OPEN' }]); setPositionForm({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' }); };
+      const closePosition = (id, exitPrice) => { const pos = positions.find(p => p.id === id); if (!pos) return; setPositions(positions.map(p => p.id === id ? { ...p, status: 'CLOSED', closedAt: new Date().toISOString(), exitPrice: parseFloat(exitPrice) } : p)); setTrades([...trades, { id: Date.now(), date: new Date().toISOString().slice(0, 10), type: 'SELL', shares: pos.shares, price: parseFloat(exitPrice), fees: 0, fromPositionId: id }]); };
+      const deleteTrade = (id) => setTrades(trades.filter(t => t.id !== id));
+      const deletePosition = (id) => setPositions(positions.filter(p => p.id !== id));
+      const deleteSnapshot = (date) => setSnapshots(snapshots.filter(s => s.date !== date));
 
       const t = {
         eyebrow: { fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase', color: colors.textMute },
@@ -446,10 +414,8 @@
 
       const NavButton = ({ id, label, secondary }) => (
         <button onClick={() => setView(id)} style={{
-          background: view === id ? colors.panel : 'transparent',
-          color: view === id ? colors.gold : (secondary ? colors.textMute : colors.textDim),
-          border: `1px solid ${view === id ? colors.gold : colors.border}`,
-          padding: secondary ? '5px 10px' : '8px 14px', fontFamily: serif, fontSize: secondary ? '10px' : '11px',
+          background: view === id ? colors.panel : 'transparent', color: view === id ? colors.gold : (secondary ? colors.textMute : colors.textDim),
+          border: `1px solid ${view === id ? colors.gold : colors.border}`, padding: secondary ? '5px 10px' : '8px 14px', fontFamily: serif, fontSize: secondary ? '10px' : '11px',
           letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', flex: 1, fontWeight: view === id ? 600 : 400, borderRadius: '2px'
         }}>{label}</button>
       );
@@ -457,72 +423,45 @@
       return (
         <div style={{ minHeight: '100vh', background: `linear-gradient(180deg, ${colors.bg} 0%, ${colors.panel} 100%)`, padding: '24px 16px', fontFamily: serif, color: colors.text }}>
           <div style={{ maxWidth: '720px', margin: '0 auto' }}>
-            {/* HEADER */}
             <div style={{ marginBottom: '24px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '20px' }}>
               <div style={t.eyebrow}>Cycle Decision Framework · v13.1</div>
               <h1 style={{ fontSize: '26px', color: colors.highlight, margin: '8px 0 0 0', fontStyle: 'italic', fontWeight: 400 }}>MSTR Rotation</h1>
-              <div style={{ display: 'flex', gap: '20px', fontSize: '12px', marginTop: '12px' }}>
-                <div>BTC: ${btcPrice.toLocaleString()}</div>
-                <div>MSTR: ${mstrPrice.toFixed(2)}</div>
-                <div>mNAV: {mNAV.toFixed(2)}x</div>
+              <div style={{ display: 'flex', gap: '20px', fontSize: '12px', marginTop: '12px', flexWrap: 'wrap' }}>
+                <div><span style={{color:colors.textMute}}>BTC </span><span style={{color:colors.gold}}>${btcPrice.toLocaleString()}</span></div>
+                <div><span style={{color:colors.textMute}}>MSTR </span><span style={{color:colors.gold}}>${mstrPrice.toFixed(2)}</span></div>
+                <div><span style={{color:colors.textMute}}>200MA </span><span style={{color:colors.gold}}>{ma200 ? `$${ma200.toFixed(2)}` : '—'}</span></div>
+                <div><span style={{color:colors.textMute}}>mNAV </span><span style={{color:colors.gold}}>{mNAV.toFixed(2)}x</span></div>
               </div>
             </div>
 
-            {/* NAV NAVIGATION */}
             <div style={{ marginBottom: '20px' }}>
               <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
                 <NavButton id="dashboard" label="Dashboard" />
                 <NavButton id="positions" label={`Open · ${positions.filter(p=>p.status==='OPEN').length}`} />
-                <NavButton id="journal" label="Journal" />
+                <NavButton id="journal" label={`Journal · ${trades.length}`} />
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <NavButton id="snapshots" label={`Log · ${snapshots.length}`} secondary />
+                <NavButton id="backup" label="Backup" secondary />
               </div>
             </div>
 
             {view === 'dashboard' && (
-              <div style={{ background: cfg.bg, border: `1px solid ${cfg.color}`, padding: '20px', borderRadius: '4px' }}>
-                <div style={{ ...t.eyebrow, color: cfg.color }}>Active mode</div>
-                <div style={{ ...t.hero, color: cfg.color, margin: '4px 0 12px 0' }}>{cfg.label}</div>
-                <div style={t.body}>{cfg.action}</div>
-                
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginTop: '20px', paddingTop: '16px', borderTop: `1px solid ${colors.border}` }}>
-                  <div><div style={t.eyebrow}>Sell zone</div><div style={t.value}>{currentLevels.sell}</div></div>
-                  <div><div style={{...t.eyebrow, color: colors.gold}}>Alert Price</div><div style={{...t.value, color: colors.gold}}>{alertLevels.rotate?.buyAlert ? `$${alertLevels.rotate.buyAlert.toFixed(2)}` : '—'}</div></div>
-                  <div><div style={t.eyebrow}>Buy zone</div><div style={t.value}>{currentLevels.buy}</div></div>
-                </div>
-
-                <div style={{ marginTop: '24px' }}>
-                  <div style={t.eyebrow}>Data Pipeline Upload</div>
-                  <textarea value={pasteText} onChange={(e)=>setPasteText(e.target.value)} placeholder="Paste data array here..." style={{ width:'100%', height:'80px', background:colors.bg, color:colors.text, border:`1px solid ${colors.border}`, marginTop:'6px', padding:'8px', boxSizing:'border-box', fontFamily:'monospace', fontSize:'11px' }} />
-                  <button onClick={applyPaste} style={{ width:'100%', padding:'10px', background:colors.green, color:'#fff', border:'none', marginTop:'6px', fontWeight:600, cursor:'pointer' }}>APPLY SYSTEM PAYLOAD</button>
-                </div>
-              </div>
-            )}
-
-            {view === 'positions' && (
-              <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px' }}>
-                <div style={t.value}>Open Active Order Book</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '12px' }}>
-                  <input type="number" placeholder="Shares" value={positionForm.shares} onChange={(e)=>setPositionForm({...positionForm, shares:e.target.value})} style={{ background:colors.bg, color:colors.text, border:`1px solid ${colors.border}`, padding:'8px' }} />
-                  <input type="number" placeholder="Entry Price" value={positionForm.entryPrice} onChange={(e)=>setPositionForm({...positionForm, entryPrice:e.target.value})} style={{ background:colors.bg, color:colors.text, border:`1px solid ${colors.border}`, padding:'8px' }} />
-                </div>
-                <button onClick={openPosition} style={{ width:'100%', padding:'10px', background:colors.gold, color:'#000', border:'none', marginTop:'10px', fontWeight:600 }}>INITIALIZE OPEN RECORD</button>
-                
-                <div style={{ marginTop: '20px' }}>
-                  {positions.map(p => p.status === 'OPEN' && (
-                    <div key={p.id} style={{ padding: '10px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>{p.shares} sh @ ${p.entryPrice}</div>
-                      <button onClick={()=>closePosition(p.id, mstrPrice)} style={{ background:colors.red, color:'#fff', border:'none', padding:'4px 8px' }}>CLOSE</button>
+              <>
+                <div style={{ background: cfg.bg, border: `1px solid ${cfg.color}`, padding: '20px', borderRadius: '4px', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', gap: '16px', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ ...t.eyebrow, color: cfg.color }}>Active mode</div>
+                      <div style={{ fontSize: '20px', color: cfg.color, fontWeight: 600, marginTop: '4px' }}>{cfg.label}</div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    }
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={t.eyebrow}>MSTR Close</div>
+                      <div style={t.hero}>${mstrPrice.toFixed(2)}</div>
+                      {priceRange?.verdict && <div style={{ ...t.eyebrow, color: priceRange.tone, marginTop: '4px', fontWeight: 600 }}>{priceRange.verdict}</div>}
+                    </div>
+                  </div>
 
-    const root = ReactDOM.createRoot(document.getElementById('mstr-app-root'));
-    root.render(<MSTRCycleTool />);
-  </script>
-</body>
-</html>
+                  {priceRange?.pct !== null && mode === 'ROTATE' && (
+                    <div style={{ marginBottom: '18px' }}>
+                      <div style={{ position: 'relative', height: '6px', background: '#0a0806', borderRadius: '3px', border: `1px solid ${colors.border}` }}>
+                        <div style={{ position: 'absolute', left: `${priceRange.pct * 100}%`, top: '-3px', width: '
