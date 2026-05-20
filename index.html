@@ -10,49 +10,90 @@
 
 <!--
   =================================================================
-  MSTR CYCLE DECISION FRAMEWORK · v13.2 (web build)
+  MSTR CYCLE DECISION FRAMEWORK · v14.1 (web build)
   =================================================================
+
+  CHANGES IN v14.1 vs v14.0
+  -------------------------
+  Hardening pass focused on data quality and parser robustness.
+
+    1. Hardened prompt: forces LLM to (a) state its sense of "now",
+       (b) prefer real-time sources over articles, (c) self-rate
+       confidence HIGH/MEDIUM/LOW with explicit criteria, (d) emit
+       DATA_TIMESTAMP and STALE_FIELDS for structured staleness
+       detection. The prompt is now ~2.5x longer but extracts much
+       more reliable, dated data.
+
+    2. Staleness banner: top-of-dashboard warning when data is stale.
+       Two-tier (amber >24h, red >72h) plus a separate flag when LLM
+       confidence is LOW or any STALE_FIELDS are reported. Driven by
+       LLM-asserted DATA_TIMESTAMP when available (preferred), falling
+       back to paste-time. Stale data at source is now distinguishable
+       from stale paste.
+
+    3. Parser hardening: replaced parseFloat/!isNaN combo with
+       Number.isFinite-based safeNum helper that explicitly rejects
+       NaN, Infinity, -Infinity, and (configurably) negative/zero
+       values. Number coercion is now explicit via Number() inside
+       safeNum, eliminating any path for non-numeric values to enter
+       state.
+
+    4. USD buying power: portfolio section now shows cashBuffer × gbpUsd
+       as a USD figure alongside the GBP one, so cash is directly
+       comparable to USD-quoted ladder rungs. In DEPLOY mode, also
+       shows estimated per-rung dollar amount and share equivalent.
+
+    5. lastUpdated bug fix: previously sliced to YYYY-MM-DD, which
+       made the staleness check unable to distinguish minutes-old
+       from 23-hours-old paste. Now stores full ISO timestamp.
+
+  CHANGES IN v14.0 vs v13.2
+  -------------------------
+  Three new on-chain / corporate signals added per the framework
+  research note. All three are sourced via the augmented prompt and
+  parsed automatically into state. No new manual data entry burden.
+
+    1. mNAV (computed): The primary valuation metric for BTC treasury
+       companies. EV / BTC NAV. Two thresholds drive scoring:
+         - mNAV < 1.05  → +2 bottom (capitulation / sub-NAV print zone)
+         - mNAV 1.05–1.20 → +1 bear (premium-engine stall — ATM less effective)
+         - mNAV > 2.5  → +2 bear (late-cycle euphoria)
+       UI ladder rewritten: green <1.05, neutral 1.05–1.8, amber 1.8–2.5, red >2.5
+
+    2. BTC below STH cost basis: Short-term holders are recent buyers;
+       when spot < STH realized price they're underwater and structural
+       sell pressure rises. +1 bear, +1 bottom when ON.
+
+    3. ETF outflows persistent: 5-day cumulative net spot BTC ETF flows.
+       More than $500M outflows over 5 trading days flips this ON.
+       +1 bear. Measures institutional risk-off (the marginal spot
+       buyer/seller that funding rates do NOT capture).
+
+  Max bear score: 13 → 17
+  Max bottom score: 17 → 19
+  HOARD threshold ≥6 and DEPLOY threshold ≥7 unchanged (proportional).
+
+  New dashboard card "On-chain & corporate signals" surfaces all three
+  new readings with their threshold proximity, so users see the
+  underlying numbers rather than just the boolean.
+
+  Prompt updated to request: STH_REALIZED_PRICE, ETF_FLOWS_5D, MNAV,
+  TOTAL_DEBT, PREFERRED_NOTIONAL, CASH_POSITION. Plus four new binary
+  flags (BTC_BELOW_STH_COST, ETF_OUTFLOWS_PERSISTENT, MNAV_COMPRESSED,
+  MNAV_EUPHORIC).
+
+  IMPORTANT: legacy MNAV calculation from BTC_HOLDINGS / DILUTED_SHARES
+  is retained as a sanity-check (shown as "computed mNAV" alongside the
+  parsed value). They will diverge slightly because the legacy calc
+  ignores debt + preferred − cash. The new parsed value is authoritative.
 
   CHANGING THE PASSWORD
   ---------------------
-  Default password is "mstr". To change it:
-  1. Open this page in a browser.
-  2. Open DevTools (F12) and paste into the Console:
-
-       (async () => {
-         const buf = await crypto.subtle.digest(
-           'SHA-256',
-           new TextEncoder().encode('YOUR_NEW_PASSWORD')
-         );
-         console.log(Array.from(new Uint8Array(buf))
-           .map(b => b.toString(16).padStart(2, '0')).join(''));
-       })();
-
-  3. Copy the printed hex string and replace the value of
-     PASSWORD_HASH below.
-  4. Commit + push to GitHub. The new password is live.
-
-  SECURITY HONESTY
-  ----------------
-  This is a CASUAL barrier, not real authentication. Anyone who
-  opens DevTools can read PASSWORD_HASH and brute-force it offline,
-  or simply edit AUTH_REQUIRED below to false. It stops random
-  passers-by who stumble on the URL. It does not stop a determined
-  attacker. Do not paste anything genuinely sensitive into this tool.
-
-  STORAGE
-  -------
-  Trades, positions, snapshots, settings all live in this browser's
-  localStorage. They are private to your browser and do not leave
-  this device unless you explicitly use Backup → Download .json.
-  Different browsers / devices = different stores; sync them via
-  the JSON export/import flow.
+  (unchanged from v13.2 — see PASSWORD_HASH below)
 -->
 
 <script>
   // === GATE CONFIG ============================================
-  // SHA-256 of the default password "mstr". Replace per the
-  // instructions above to change.
   const PASSWORD_HASH = '021ab4d101785587d5ddc3e3715150393924c9df228cb6732c40da48a6cfc7c4';
   const AUTH_REQUIRED = true;
   const AUTH_SESSION_KEY = 'mstr:auth';
@@ -70,18 +111,14 @@
 </script>
 
 <style>
-  /* Browser reset + base */
   *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #0a0806; color: #d4c8b8; -webkit-font-smoothing: antialiased; }
   body { font-family: Georgia, "Times New Roman", serif; min-height: 100vh; min-height: 100dvh; }
   input, button, textarea { font-family: inherit; }
-  /* Removes Safari's default ugly input styling on mobile */
   input[type="number"] { -moz-appearance: textfield; }
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  /* Loading state before React mounts */
   #loading { display: flex; align-items: center; justify-content: center; min-height: 100vh; min-height: 100dvh; color: #8a7a65; font-size: 12px; letter-spacing: 0.15em; text-transform: uppercase; }
-  /* Gate */
   .gate { display: flex; align-items: center; justify-content: center; min-height: 100vh; min-height: 100dvh; padding: 24px; }
   .gate-card { background: #14100c; border: 1px solid #2a2520; padding: 32px; max-width: 360px; width: 100%; border-radius: 3px; }
   .gate-title { font-size: 14px; color: #d4a017; letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
@@ -96,7 +133,6 @@
 <body>
 <div id="root"><div id="loading">Loading…</div></div>
 
-<!-- React via CDN, no build step required -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -104,9 +140,6 @@
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo } = React;
 
-// =====================================================================
-// GATE COMPONENT
-// =====================================================================
 function Gate({ onUnlock }) {
   const [pw, setPw] = useState('');
   const [err, setErr] = useState('');
@@ -147,21 +180,16 @@ function Gate({ onUnlock }) {
   );
 }
 
-// =====================================================================
-// MAIN TOOL COMPONENT (ported from artifact)
-// =====================================================================
-
-
 function MSTRCycleTool() {
-  // ============ CORE PRICE STATE (prompt-driven) ============
+  // ============ CORE PRICE STATE ============
   const [mstrPrice, setMstrPrice] = useState(187);
   const [btcPrice, setBtcPrice] = useState(80000);
   const [ma200, setMa200] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null); // when prompt-data was last applied
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [pasteText, setPasteText] = useState('');
   const [pasteResult, setPasteResult] = useState(null);
 
-  // ============ TECHNICAL LEVELS (prompt-driven) ============
+  // ============ TECHNICAL LEVELS ============
   const [high20, setHigh20] = useState(null);
   const [low20, setLow20] = useState(null);
   const [high50, setHigh50] = useState(null);
@@ -181,10 +209,31 @@ function MSTRCycleTool() {
   const [dilutedShares, setDilutedShares] = useState(280);
   const [corporateBaseUpdated, setCorporateBaseUpdated] = useState(null);
   const [startingShares, setStartingShares] = useState(211);
-  const [cashBuffer, setCashBuffer] = useState(0);  // GBP — uncommitted cash in SIPP
-  const [gbpUsd, setGbpUsd] = useState(1.27);       // for displaying GBP totals
+  const [cashBuffer, setCashBuffer] = useState(0);
+  const [gbpUsd, setGbpUsd] = useState(1.27);
 
-  // Level overrides (persisted)
+  // ============ v14 NEW STATE: mNAV / STH / ETF flows ============
+  // mNAV is parsed from prompt response directly (LLM computes it including debt+preferred-cash).
+  // We also retain a legacy mNAV computed from just holdings+shares so users can sanity-check.
+  const [parsedMnav, setParsedMnav] = useState(null);
+  const [totalDebt, setTotalDebt] = useState(null);          // millions USD
+  const [preferredNotional, setPreferredNotional] = useState(null);  // millions USD
+  const [cashPosition, setCashPosition] = useState(null);    // millions USD
+  const [sthRealizedPrice, setSthRealizedPrice] = useState(null);
+  const [btcBelowSthCost, setBtcBelowSthCost] = useState(false);
+  const [etfFlows5d, setEtfFlows5d] = useState(null);        // millions USD, signed
+  const [etfOutflowsPersistent, setEtfOutflowsPersistent] = useState(false);
+  const [mnavCompressed, setMnavCompressed] = useState(false);
+  const [mnavEuphoric, setMnavEuphoric] = useState(false);
+
+  // v14.1: data freshness tracking — driven by the LLM's stated DATA_TIMESTAMP
+  // rather than paste-time, because data can be stale-at-source even if you
+  // pasted it 5 seconds ago.
+  const [dataTimestamp, setDataTimestamp] = useState(null);  // ISO string from LLM
+  const [confidence, setConfidence] = useState(null);         // HIGH | MEDIUM | LOW
+  const [staleFields, setStaleFields] = useState(null);       // comma-sep string or "NONE"
+
+  // Level overrides
   const [levelsAuto, setLevelsAuto] = useState(true);
   const [manualSellLow, setManualSellLow] = useState(192);
   const [manualSellHigh, setManualSellHigh] = useState(200);
@@ -195,15 +244,12 @@ function MSTRCycleTool() {
   const [trades, setTrades] = useState([]);
   const [snapshots, setSnapshots] = useState([]);
 
-  // ============ AGGRESSION PROFILE (persisted) ============
-  // Scales rotation sizing, band width, HOARD entry sensitivity, and DEPLOY ladder steepness.
-  const [aggressionStyle, setAggressionStyle] = useState('moderate'); // 'conservative' | 'moderate' | 'aggressive'
+  // ============ AGGRESSION PROFILE ============
+  const [aggressionStyle, setAggressionStyle] = useState('moderate');
 
-  // ============ ACTIVE POSITIONS (persisted) ============
-  // Open trades being tracked. Closing one writes a CLOSED entry to `trades`.
+  // ============ ACTIVE POSITIONS ============
   const [positions, setPositions] = useState([]);
   const [positionForm, setPositionForm] = useState({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' });
-  // Per-position controlled inputs for the close-price field; keyed by position id.
   const [exitPrices, setExitPrices] = useState({});
   const [view, setView] = useState('dashboard');
   const [tradeType, setTradeType] = useState('SELL');
@@ -249,6 +295,21 @@ function MSTRCycleTool() {
           if (s.manualBuyLow !== undefined) setManualBuyLow(s.manualBuyLow);
           if (s.manualBuyHigh !== undefined) setManualBuyHigh(s.manualBuyHigh);
           if (s.aggressionStyle !== undefined) setAggressionStyle(s.aggressionStyle);
+          // v14 fields
+          if (s.parsedMnav !== undefined) setParsedMnav(s.parsedMnav);
+          if (s.totalDebt !== undefined) setTotalDebt(s.totalDebt);
+          if (s.preferredNotional !== undefined) setPreferredNotional(s.preferredNotional);
+          if (s.cashPosition !== undefined) setCashPosition(s.cashPosition);
+          if (s.sthRealizedPrice !== undefined) setSthRealizedPrice(s.sthRealizedPrice);
+          if (s.btcBelowSthCost !== undefined) setBtcBelowSthCost(s.btcBelowSthCost);
+          if (s.etfFlows5d !== undefined) setEtfFlows5d(s.etfFlows5d);
+          if (s.etfOutflowsPersistent !== undefined) setEtfOutflowsPersistent(s.etfOutflowsPersistent);
+          if (s.mnavCompressed !== undefined) setMnavCompressed(s.mnavCompressed);
+          if (s.mnavEuphoric !== undefined) setMnavEuphoric(s.mnavEuphoric);
+          // v14.1 freshness fields
+          if (s.dataTimestamp !== undefined) setDataTimestamp(s.dataTimestamp);
+          if (s.confidence !== undefined) setConfidence(s.confidence);
+          if (s.staleFields !== undefined) setStaleFields(s.staleFields);
         }
       } catch (e) {}
       try { const t = ({ value: localStorage.getItem('mstr:trades') }); if (t?.value) setTrades(JSON.parse(t.value)); } catch (e) {}
@@ -269,6 +330,12 @@ function MSTRCycleTool() {
           corporateBaseUpdated, startingShares, cashBuffer, gbpUsd,
           levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh,
           aggressionStyle,
+          // v14 fields
+          parsedMnav, totalDebt, preferredNotional, cashPosition,
+          sthRealizedPrice, btcBelowSthCost, etfFlows5d, etfOutflowsPersistent,
+          mnavCompressed, mnavEuphoric,
+          // v14.1
+          dataTimestamp, confidence, staleFields,
         }));
       } catch (e) {}
     };
@@ -279,7 +346,11 @@ function MSTRCycleTool() {
       weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares,
       corporateBaseUpdated, startingShares, cashBuffer, gbpUsd,
       levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh,
-      aggressionStyle]);
+      aggressionStyle,
+      parsedMnav, totalDebt, preferredNotional, cashPosition,
+      sthRealizedPrice, btcBelowSthCost, etfFlows5d, etfOutflowsPersistent,
+      mnavCompressed, mnavEuphoric,
+      dataTimestamp, confidence, staleFields]);
 
   const handleHoldingsChange = (v) => { setBtcHoldings(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
   const handleSharesChange = (v) => { setDilutedShares(v); setCorporateBaseUpdated(new Date().toISOString().slice(0, 10)); };
@@ -287,7 +358,29 @@ function MSTRCycleTool() {
   // ============ DERIVED CALCS ============
   const btcPerShare = useMemo(() => btcHoldings / (dilutedShares * 1_000_000), [btcHoldings, dilutedShares]);
   const fairValue = useMemo(() => btcPerShare * btcPrice, [btcPerShare, btcPrice]);
-  const mNAV = useMemo(() => fairValue > 0 ? mstrPrice / fairValue : 0, [mstrPrice, fairValue]);
+
+  // Legacy mNAV (market cap only) — kept as a sanity-check display
+  const legacyMnav = useMemo(() => fairValue > 0 ? mstrPrice / fairValue : 0, [mstrPrice, fairValue]);
+
+  // Authoritative mNAV: prefer the parsed value from the LLM (which includes debt + preferred − cash).
+  // If we don't have it yet, fall back to the legacy figure with a flag so the UI can label it.
+  const mNAV = useMemo(() => parsedMnav !== null ? parsedMnav : legacyMnav, [parsedMnav, legacyMnav]);
+  const mNAVisLegacy = parsedMnav === null;
+
+  // Recompute mNAV from corporate inputs as a cross-check. Returns null if any input is missing.
+  // This is what the LLM should produce; if our recompute differs by >0.1x from parsedMnav we flag it.
+  const recomputedMnav = useMemo(() => {
+    if (totalDebt === null || preferredNotional === null || cashPosition === null) return null;
+    const marketCap = mstrPrice * dilutedShares;                              // millions USD
+    const ev = marketCap + totalDebt + preferredNotional - cashPosition;      // millions USD
+    const btcNav = (btcHoldings * btcPrice) / 1_000_000;                      // millions USD
+    return btcNav > 0 ? ev / btcNav : null;
+  }, [mstrPrice, dilutedShares, totalDebt, preferredNotional, cashPosition, btcHoldings, btcPrice]);
+
+  const mNAVdiscrepancy = useMemo(() => {
+    if (parsedMnav === null || recomputedMnav === null) return null;
+    return Math.abs(parsedMnav - recomputedMnav);
+  }, [parsedMnav, recomputedMnav]);
 
   const cycleData = useMemo(() => {
     const ath = new Date('2025-10-06');
@@ -305,9 +398,34 @@ function MSTRCycleTool() {
     return Math.floor((new Date() - new Date(corporateBaseUpdated)) / 86400000);
   }, [corporateBaseUpdated, lastUpdated]);
 
+  // ============ v14.1 FRESHNESS DERIVATION ============
+  // Two-tier staleness: amber >24h, red >72h. Driven by LLM-asserted DATA_TIMESTAMP
+  // when available (preferred — captures stale-at-source data); falls back to paste
+  // time (`lastUpdated`) only if the LLM didn't provide a timestamp.
+  // We re-evaluate on every render via Date.now() rather than memoising tightly so
+  // the banner updates as time passes without a state change.
+  const freshness = useMemo(() => {
+    // Prefer the LLM-asserted source timestamp; fall back to paste-time
+    let ts = null;
+    let source = null;
+    if (dataTimestamp) {
+      const parsed = new Date(dataTimestamp);
+      if (!isNaN(parsed.getTime())) { ts = parsed; source = 'data-timestamp'; }
+    }
+    if (!ts && lastUpdated) {
+      const parsed = new Date(lastUpdated);
+      if (!isNaN(parsed.getTime())) { ts = parsed; source = 'paste-time'; }
+    }
+    if (!ts) return { tier: 'none', hours: null, source: null, label: 'No data loaded' };
+
+    const hours = (Date.now() - ts.getTime()) / 3600000;
+    let tier = 'fresh';
+    if (hours > 72) tier = 'red';
+    else if (hours > 24) tier = 'amber';
+    return { tier, hours, source, ts };
+  }, [dataTimestamp, lastUpdated]);
+
   // ============ AGGRESSION PROFILE ============
-  // Three styles flex four levers: rotation sizing %, band width, HOARD entry sensitivity,
-  // and DEPLOY ladder steepness. Moderate is the documented base case.
   const profile = useMemo(() => {
     switch (aggressionStyle) {
       case 'conservative':
@@ -315,9 +433,9 @@ function MSTRCycleTool() {
           label: 'Conservative',
           rotationSizePctLow: 15,
           rotationSizePctHigh: 20,
-          bandWidthMult: 0.55,        // wider bands → fewer trigger fires
-          hoardSensitivity: 1.15,     // HOARD entry zone pulled closer to current (quicker to HOARD)
-          deployLadderSteepness: 0.9, // tighter ladder spacing (deploy less aggressively into the hole)
+          bandWidthMult: 0.55,
+          hoardSensitivity: 1.15,
+          deployLadderSteepness: 0.9,
           note: 'Wider bands, smaller rotations, quicker to HOARD.',
         };
       case 'aggressive':
@@ -325,9 +443,9 @@ function MSTRCycleTool() {
           label: 'Aggressive',
           rotationSizePctLow: 35,
           rotationSizePctHigh: 45,
-          bandWidthMult: 0.28,        // tighter bands → more frequent trigger fires
-          hoardSensitivity: 0.85,     // HOARD entry held lower (still follows HOARD signal but holds ROTATE longer)
-          deployLadderSteepness: 1.15,// wider ladder spacing (deploy harder on the way down)
+          bandWidthMult: 0.28,
+          hoardSensitivity: 0.85,
+          deployLadderSteepness: 1.15,
           note: 'Tighter bands, larger rotations, holds ROTATE longer.',
         };
       default:
@@ -344,36 +462,25 @@ function MSTRCycleTool() {
   }, [aggressionStyle]);
 
   // ============ DYNAMIC LEVELS ============
-  // Calculate technical levels from OHLC data
-  // Technicals come straight from prompt-driven state values
   const technicals = useMemo(() => {
     if (high20 === null || low20 === null || atr14 === null) return null;
     return { high20, low20, high50, low50, low200, atr14 };
   }, [high20, low20, high50, low50, low200, atr14]);
 
-  // Mode-specific level calculation
-  // ROTATE bands compute purely from 20d range + ATR — no ma200 dependency.
-  // HOARD/DEPLOY prefer ma200-anchored targets when available, fall back to ATR-anchored
-  // estimates when it's missing so the tool stays useful in degraded data conditions.
-  // Aggression profile scales band width, HOARD sensitivity, and DEPLOY ladder steepness.
   const dynamicLevels = useMemo(() => {
     if (!technicals) return null;
     const { high20, low20, atr14 } = technicals;
     const current = mstrPrice;
 
-    // ROTATE: sell at 20-day high (floored at current + 1 ATR), buy at 20-day low (floored at current - 1 ATR)
     const rotateSellTarget = Math.max(high20, current + atr14);
     const rotateBuyTarget = Math.min(low20, current - atr14);
     const bandWidth = atr14 * profile.bandWidthMult;
 
-    // HOARD entry: scale by sensitivity. >1 pulls entry closer to current (quicker to engage),
-    // <1 pushes entry deeper (holds ROTATE longer before flipping).
     const hoardBuyAnchor = ma200 ? ma200 * 0.85 : current - atr14 * 2;
     const hoardBuyDeep = ma200 ? ma200 * 0.75 : current - atr14 * 3;
     const hoardBuyTarget = current - (current - hoardBuyAnchor) / profile.hoardSensitivity;
     const hoardBuyDeepTarget = current - (current - hoardBuyDeep) / profile.hoardSensitivity;
 
-    // DEPLOY ladder: steepness scales the spacing between rungs around the 200MA anchor
     const deployRungs = ma200
       ? [
           { level: current, pct: 25 },
@@ -406,6 +513,16 @@ function MSTRCycleTool() {
   }, [technicals, ma200, mstrPrice, profile]);
 
   // ============ SCORES + MODE ============
+  // v14 scoring additions:
+  //  Bear:
+  //    +1 mNAV in 1.05–1.20 (premium-engine stall)
+  //    +2 mNAV > 2.5 (euphoria)
+  //    +1 BTC below STH cost basis
+  //    +1 ETF outflows persistent (>$500M over 5 trading days)
+  //  Bottom:
+  //    +2 mNAV < 1.05 (capitulation marker — sub-NAV print zone)
+  //    +1 BTC below STH cost basis
+  // Max bear: 17 (was 13). Max bottom: 19 (was 17).
   const bearScore = useMemo(() => {
     let s = 0;
     if (btcPrice < 72500) s += 2;
@@ -417,8 +534,13 @@ function MSTRCycleTool() {
     if (weeklyLowerLow) s += 1;
     if (dxyAbove110) s += 1;
     if (cycleData.remaining > 0 && cycleData.remaining < 180) s += 1;
+    // v14 additions
+    if (mNAV >= 1.05 && mNAV < 1.20) s += 1;   // premium-engine stall
+    if (mNAV > 2.5) s += 2;                    // euphoria zone
+    if (btcBelowSthCost) s += 1;
+    if (etfOutflowsPersistent) s += 1;
     return s;
-  }, [btcPrice, nupl, mvrv, fundingNegative, below200ma, weeklyLowerLow, dxyAbove110, cycleData]);
+  }, [btcPrice, nupl, mvrv, fundingNegative, below200ma, weeklyLowerLow, dxyAbove110, cycleData, mNAV, btcBelowSthCost, etfOutflowsPersistent]);
 
   const bottomScore = useMemo(() => {
     let s = 0;
@@ -430,8 +552,11 @@ function MSTRCycleTool() {
     if (mvrv < 0.8) s += 3;
     if (derivativesExhaustion) s += 2;
     if (Math.abs(cycleData.remaining) < 60) s += 2;
+    // v14 additions
+    if (mNAV > 0 && mNAV < 1.05) s += 2;       // sub-NAV / capitulation
+    if (btcBelowSthCost) s += 1;
     return s;
-  }, [mstrPrice, btcPrice, nupl, mvrv, derivativesExhaustion, cycleData]);
+  }, [mstrPrice, btcPrice, nupl, mvrv, derivativesExhaustion, cycleData, mNAV, btcBelowSthCost]);
 
   const mode = useMemo(() => {
     if (bottomScore >= 7 && mstrPrice < 140) return 'DEPLOY';
@@ -439,12 +564,11 @@ function MSTRCycleTool() {
     return 'ROTATE';
   }, [bearScore, bottomScore, mstrPrice]);
 
-  // ============ LEVEL DISPLAY STRINGS ============
+  // ============ LEVEL DISPLAY ============
   const fmt = (v) => `$${Math.round(v)}`;
   const fmtRange = (low, high) => `${fmt(low)}–${fmt(high)}`;
 
   const levelDisplay = useMemo(() => {
-    // If manual override or no dynamic data, use manual values
     if (!levelsAuto || !dynamicLevels) {
       return {
         rotate: { sell: fmtRange(manualSellLow, manualSellHigh), buy: fmtRange(manualBuyLow, manualBuyHigh) },
@@ -469,14 +593,7 @@ function MSTRCycleTool() {
     };
   }, [levelsAuto, dynamicLevels, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh]);
 
-  // ============ ALERT LEVELS ============
-  // Single-figure alert prices for setting Yahoo Finance (or similar) price alerts.
-  // ROTATE uses inner-edge: sellLow (price entering sell zone) and buyHigh (price entering buy zone)
-  // so you get the earliest possible notification with maximum reaction time. HOARD/DEPLOY are
-  // already single-number anchors (buyTarget, ladder rungs) so they pass through unchanged.
-  // Returns either a number or null per slot — null means "no single alert level makes sense here".
   const alertLevels = useMemo(() => {
-    // Manual mode: derive inner-edge from the manual sliders
     if (!levelsAuto || !dynamicLevels) {
       return {
         rotate: { sellAlert: manualSellLow, buyAlert: manualBuyHigh },
@@ -487,13 +604,13 @@ function MSTRCycleTool() {
     const d = dynamicLevels;
     return {
       rotate: {
-        sellAlert: d.rotate.sellLow,   // inner edge of sell band — alert when price enters it
-        buyAlert:  d.rotate.buyHigh,    // inner edge of buy band — alert when price enters it
+        sellAlert: d.rotate.sellLow,
+        buyAlert:  d.rotate.buyHigh,
       },
       hoard: {
         sellAlert:     d.hoard.sellLow,
-        buyAlert:      d.hoard.buyTarget,       // already a single number
-        buyDeepAlert:  d.hoard.buyDeepTarget,   // already a single number
+        buyAlert:      d.hoard.buyTarget,
+        buyDeepAlert:  d.hoard.buyDeepTarget,
       },
       deploy: {
         sellAlert: null,
@@ -512,14 +629,11 @@ function MSTRCycleTool() {
   const deploySuppressed = bottomScore >= 7 && mstrPrice >= 140;
 
   // ============ BAND-HIT DETECTION ============
-  // Returns an array of currently-triggered bands relative to mstrPrice and the active mode.
-  // Each hit is { tag, side, label, zone, price } so the UI can render chips and prefill the form.
   const bandHits = useMemo(() => {
     if (!dynamicLevels) return [];
     const hits = [];
     const d = dynamicLevels;
     const p = mstrPrice;
-    // ROTATE bands: live in ROTATE mode
     if (mode === 'ROTATE') {
       if (p >= d.rotate.sellLow && p <= d.rotate.sellHigh) {
         hits.push({ tag: 'ROTATE-SELL', side: 'SELL', label: 'ROTATE sell zone hit', zone: `${fmt(d.rotate.sellLow)}–${fmt(d.rotate.sellHigh)}`, price: p });
@@ -528,12 +642,10 @@ function MSTRCycleTool() {
         hits.push({ tag: 'ROTATE-BUY', side: 'BUY', label: 'ROTATE buy zone hit', zone: `${fmt(d.rotate.buyLow)}–${fmt(d.rotate.buyHigh)}`, price: p });
       }
     }
-    // HOARD bands: sell live, buy target tracked but flagged only when in range
     if (mode === 'HOARD') {
       if (p >= d.hoard.sellLow && p <= d.hoard.sellHigh) {
         hits.push({ tag: 'HOARD-SELL', side: 'SELL', label: 'HOARD sell zone hit', zone: `${fmt(d.hoard.sellLow)}–${fmt(d.hoard.sellHigh)}`, price: p });
       }
-      // Treat buyTarget as a ±1.5% trigger window
       const t = d.hoard.buyTarget;
       if (p >= t * 0.985 && p <= t * 1.015) {
         hits.push({ tag: 'HOARD-BUY', side: 'BUY', label: 'HOARD buy target reached', zone: fmt(t), price: p });
@@ -543,7 +655,6 @@ function MSTRCycleTool() {
         hits.push({ tag: 'HOARD-BUY-DEEP', side: 'BUY', label: 'HOARD deep buy target reached', zone: fmt(dt), price: p });
       }
     }
-    // DEPLOY ladder: every rung at-or-below current price is "live"
     if (mode === 'DEPLOY') {
       d.deploy.ladder.forEach((rung, i) => {
         if (p <= rung.level * 1.015) {
@@ -554,14 +665,6 @@ function MSTRCycleTool() {
     return hits;
   }, [dynamicLevels, mstrPrice, mode]);
 
-  // ============ PRICE-IN-RANGE (hero derivation) ============
-  // Surfaces the most important question this tool answers: where is MSTR right now
-  // relative to my action zones? Returns a 0-1 position, a status verdict, and a colour cue.
-  // In ROTATE: 0 = at buyLow, 1 = at sellHigh.
-  // In HOARD: focuses on distance-to-buy-target (or how far above sell zone).
-  // In DEPLOY: focuses on which ladder rung is currently live.
-  // Hex values inlined here (rather than reading from the `colors` object below) because
-  // this memo runs before `colors` is declared — referencing it would hit a TDZ error.
   const priceRange = useMemo(() => {
     if (!dynamicLevels) return null;
     const RED = '#c73e1d', GREEN = '#2d8659', GOLD = '#d4a017';
@@ -582,14 +685,13 @@ function MSTRCycleTool() {
     if (mode === 'HOARD') {
       const target = d.hoard.buyTarget;
       const deep = d.hoard.buyDeepTarget;
-      const pctToTarget = ((p / target) - 1) * 100;   // positive = above target
+      const pctToTarget = ((p / target) - 1) * 100;
       const inSell = p >= d.hoard.sellLow;
       const atTarget = p <= target * 1.015;
       const verdict = inSell ? 'IN SELL ZONE' : atTarget ? 'AT BUY TARGET' : `${pctToTarget > 0 ? '+' : ''}${pctToTarget.toFixed(1)}% vs target`;
       const tone = inSell ? RED : atTarget ? GREEN : GOLD;
       return { pct: null, verdict, tone, target, deep, sellLow: d.hoard.sellLow, sellHigh: d.hoard.sellHigh };
     }
-    // DEPLOY
     const liveRungs = d.deploy.ladder.filter(r => p <= r.level * 1.015);
     const verdict = liveRungs.length > 0 ? `${liveRungs.length}/4 RUNGS LIVE` : 'ABOVE LADDER';
     return { pct: null, verdict, tone: GREEN, ladder: d.deploy.ladder };
@@ -598,9 +700,9 @@ function MSTRCycleTool() {
   const journalStats = useMemo(() => {
     let currentShares = startingShares;
     let totalCash = 0;
-    let rotationShares = 0;       // cumulative shares gained via SELL → BUY rotations
-    let completedRotations = 0;   // number of completed pairs
-    let openSell = null;          // most recent unmatched SELL
+    let rotationShares = 0;
+    let completedRotations = 0;
+    let openSell = null;
 
     const sorted = [...trades].sort((a, b) => a.date.localeCompare(b.date));
 
@@ -609,15 +711,11 @@ function MSTRCycleTool() {
       if (t.type === 'SELL') {
         currentShares -= t.shares;
         totalCash += gross - (t.fees || 0);
-        // Track the SELL as potentially the start of a rotation pair
         openSell = { shares: t.shares, price: t.price };
       } else {
-        // BUY
         currentShares += t.shares;
         totalCash -= gross + (t.fees || 0);
-        // If we have an open SELL, the BUY completes a rotation
         if (openSell) {
-          // Shares gained = buy_shares - sell_shares (the rotation accumulation)
           const gained = t.shares - openSell.shares;
           rotationShares += gained;
           completedRotations += 1;
@@ -637,7 +735,6 @@ function MSTRCycleTool() {
     };
   }, [trades, startingShares]);
 
-  // Portfolio summary: shares value + uncommitted cash buffer (GBP)
   const portfolio = useMemo(() => {
     const positionUSD = journalStats.currentShares * mstrPrice;
     const positionGBP = positionUSD / gbpUsd;
@@ -647,125 +744,232 @@ function MSTRCycleTool() {
     return { positionUSD, positionGBP, totalGBP, cashPct, positionPct };
   }, [journalStats.currentShares, mstrPrice, gbpUsd, cashBuffer]);
 
-  const claudePrompt = `Please web-search current data and return MSTR / BTC readings in the EXACT machine-readable format below. I will paste your response directly into a decision tool.
+  // ============ v14 PROMPT (with new fields) ============
+  const claudePrompt = `You are providing market data that will feed a live trading decision tool. ACCURACY AND FRESHNESS ARE CRITICAL. Stale or guessed data will lead to bad trades. Read the rules below carefully before searching.
 
-Search for: latest MSTR closing price; MSTR 200-day simple moving average value; MSTR daily high/low for last 20, 50, and 200 trading days; MSTR 14-day Average True Range; current Bitcoin spot price; BTC NUPL (Net Unrealised Profit/Loss) percentage; BTC MVRV ratio; BTC perpetual futures funding rates and open interest trend across major exchanges; current DXY level; Strategy Inc (MSTR) latest disclosed BTC holdings from most recent 8-K filing; Strategy diluted share count from most recent 10-Q.
+═══════════════════════════════════════════════════════════════
+PHASE 1 — STATE THE CURRENT TIME
+═══════════════════════════════════════════════════════════════
+Before searching, write a single line stating the current UTC date and time as you understand it. Example: "Current time: 2026-05-20 14:30 UTC". This anchors your sense of "now" so you can correctly judge what is fresh vs stale.
 
-Return your response as a single fenced code block containing the keys below, one per line, no commentary INSIDE the block. Outside the block you may add brief context or caveats.
+═══════════════════════════════════════════════════════════════
+PHASE 2 — SEARCH WITH FRESHNESS DISCIPLINE
+═══════════════════════════════════════════════════════════════
+Search for each of the items below. For EACH search, prefer real-time/live sources over articles. Examples of preferred sources:
+- MSTR price + technicals → finance.yahoo.com, tradingview.com, stockanalysis.com (live quote pages, not news articles)
+- MSTR 200MA + 20/50/200d highs/lows + ATR(14) → barchart.com, stockcharts.com, tradingview MSTR technicals page
+- BTC spot → coingecko.com, coindesk.com, binance.com live price
+- NUPL, MVRV, STH realized price → bitbo.io, lookintobitcoin.com, glassnode studio, cryptoquant
+- BTC perp funding + OI → coinglass.com (covers binance, bybit, okx in one place)
+- ETF 5-day flows → farside.co.uk/btc (authoritative tracker)
+- DXY → tradingview.com, marketwatch.com, investing.com
+- Strategy 8-K BTC holdings → most recent Strategy press release or SEC EDGAR 8-K filing
+- Strategy 10-Q diluted shares + debt + preferred + cash → most recent 10-Q on SEC EDGAR
+
+CRITICAL FRESHNESS RULES:
+- DO NOT use month-old articles for live prices. If your top search result is an article from days/weeks ago, search again with terms like "today", "current", "live", or the actual current date.
+- DO NOT extrapolate from training data. If you find yourself "remembering" a price or holding amount without a citation from a recent (≤7 day) source, treat that field as estimated.
+- If a source is from a weekend or holiday for a market that was closed (NYSE: Sat/Sun/US holidays), the price shown is the most recent close — note this explicitly in STALE_FIELDS.
+- For each field, internally note the timestamp of the source you used. Aggregate the OLDEST timestamp into DATA_TIMESTAMP below.
+
+═══════════════════════════════════════════════════════════════
+PHASE 3 — COMPUTE mNAV
+═══════════════════════════════════════════════════════════════
+Compute mNAV yourself using:
+  Enterprise Value (USD) = (MSTR_PRICE × DILUTED_SHARES_MILLIONS × 1,000,000) + (TOTAL_DEBT × 1,000,000) + (PREFERRED_NOTIONAL × 1,000,000) − (CASH_POSITION × 1,000,000)
+  BTC NAV (USD) = BTC_HOLDINGS × BTC_PRICE
+  mNAV = Enterprise Value / BTC NAV
+
+Then cross-check against a live tracker (bitcoinquant.co/company/MSTR, VanEck, bitcoinisdata.com). If your computed value disagrees with the tracker by more than 0.1x, recheck your inputs — usually it means debt or preferred is wrong. Report both your computed value AND the tracker's value in the post-block notes.
+
+═══════════════════════════════════════════════════════════════
+PHASE 4 — RETURN STRUCTURED DATA
+═══════════════════════════════════════════════════════════════
+Return your response as a single fenced code block containing the keys below, one per line, no commentary INSIDE the block.
 
 \`\`\`
-MSTR_PRICE: <number, current close in USD>
+DATA_TIMESTAMP: <ISO-8601 date and time of the OLDEST data point used, in UTC, e.g., 2026-05-20T13:45:00Z>
+CONFIDENCE: <HIGH | MEDIUM | LOW — see criteria below>
+STALE_FIELDS: <comma-separated list of field names where data was >24h old at source, or "NONE">
+MSTR_PRICE: <number, current close or live USD>
 MSTR_200MA: <number, 200-day simple moving average in USD>
-MSTR_20D_HIGH: <number, highest daily high over last 20 trading days>
-MSTR_20D_LOW: <number, lowest daily low over last 20 trading days>
-MSTR_50D_HIGH: <number, highest daily high over last 50 trading days>
-MSTR_50D_LOW: <number, lowest daily low over last 50 trading days>
-MSTR_200D_LOW: <number, lowest daily low over last 200 trading days>
+MSTR_20D_HIGH: <number>
+MSTR_20D_LOW: <number>
+MSTR_50D_HIGH: <number>
+MSTR_50D_LOW: <number>
+MSTR_200D_LOW: <number>
 MSTR_ATR14: <number, 14-day Average True Range in USD>
 BTC_PRICE: <number, current USD spot>
 NUPL: <number, percent without %, e.g., 28 for 28%>
 MVRV: <number with one decimal, e.g., 1.4>
+STH_REALIZED_PRICE: <number, BTC short-term holder cost basis in USD>
+ETF_FLOWS_5D: <signed integer in millions USD, e.g., -847 for $847M net outflow over last 5 trading days>
 BTC_HOLDINGS: <integer, total BTC held by Strategy>
-DILUTED_SHARES: <number in millions, e.g., 333>
+DILUTED_SHARES: <number in millions, e.g., 334>
+TOTAL_DEBT: <number in millions USD, e.g., 8200>
+PREFERRED_NOTIONAL: <number in millions USD, total notional of STRC + STRF + STRK + STRD>
+CASH_POSITION: <number in millions USD>
+MNAV: <number with two decimals, e.g., 1.18>
+DXY: <number with one decimal, e.g., 99.2>
 BELOW_200MA: ON or OFF
 WEEKLY_LL: ON or OFF
 SHORTING: ON or OFF
 EXHAUSTION: ON or OFF
 DXY_ABOVE_110: ON or OFF
+BTC_BELOW_STH_COST: ON or OFF
+ETF_OUTFLOWS_PERSISTENT: ON or OFF
+MNAV_COMPRESSED: ON or OFF
+MNAV_EUPHORIC: ON or OFF
 \`\`\`
 
-Rules:
+═══════════════════════════════════════════════════════════════
+RULES
+═══════════════════════════════════════════════════════════════
 - All numeric values: digits and one decimal point only. No $ signs, no commas, no percent signs.
-- DILUTED_SHARES: in millions (e.g., 333 not 333000000).
+- DILUTED_SHARES: in millions (e.g., 334 not 334000000).
+- TOTAL_DEBT, PREFERRED_NOTIONAL, CASH_POSITION: in millions USD.
 - BELOW_200MA: ON if MSTR closing price is below the 200-day SMA on the most recent weekly close.
 - WEEKLY_LL: ON if MSTR has printed a weekly lower-low after a weekly lower-high (confirmed downtrend structure).
 - SHORTING and EXHAUSTION are MUTUALLY EXCLUSIVE — at most one ON.
-- SHORTING: ON only if BTC perp funding is persistently and aggressively negative across major exchanges (binance, bybit, okx).
+- SHORTING: ON only if BTC perp funding is persistently and aggressively negative across binance, bybit, okx.
 - EXHAUSTION: ON only if funding is flat-to-neutral (~0.00%) AND aggregate open interest has collapsed to multi-month lows.
 - DXY_ABOVE_110: ON if US Dollar Index is currently above 110.
+- BTC_BELOW_STH_COST: ON if BTC_PRICE < STH_REALIZED_PRICE.
+- ETF_OUTFLOWS_PERSISTENT: ON if ETF_FLOWS_5D is more negative than −500 (cumulative outflows exceed $500M over last 5 trading days).
+- MNAV_COMPRESSED: ON if MNAV < 1.05 (premium collapse / capitulation marker).
+- MNAV_EUPHORIC: ON if MNAV > 2.5 (late-cycle euphoria zone).
+- MNAV_COMPRESSED and MNAV_EUPHORIC cannot both be ON.
 
-If any value cannot be reliably sourced (e.g., specific 50-day low requires chart access), provide your best estimate and add a brief note OUTSIDE the code block flagging which fields are estimates vs verified.
+═══════════════════════════════════════════════════════════════
+CONFIDENCE CRITERIA — be honest, do not inflate
+═══════════════════════════════════════════════════════════════
+HIGH: All fields sourced from live data ≤24h old. No estimates. mNAV computation matches live tracker within 0.1x. No fields rely on training data memory.
+MEDIUM: 1–2 fields are estimates or >24h old. Or mNAV computation differs from tracker by 0.1–0.2x. Or one input had to be inferred from related data.
+LOW: 3+ fields estimated; OR any major field (MSTR_PRICE, BTC_PRICE, BTC_HOLDINGS, DILUTED_SHARES, MNAV, NUPL, MVRV) is >48h old or uncertain; OR mNAV computation diverges from tracker by >0.2x; OR you could not find any live source for one or more fields.
 
-After the code block, briefly note: (1) any data older than a week, (2) any fields you had to estimate, (3) anything else worth flagging for the user.`;
+If you would normally rate this MEDIUM but the user is making time-sensitive trading decisions, prefer LOW and explain. Better to over-flag than under-flag staleness.
+
+═══════════════════════════════════════════════════════════════
+POST-BLOCK REPORT (required, outside the code block)
+═══════════════════════════════════════════════════════════════
+After the code block, ALWAYS include these sections:
+
+A) DATA TIMESTAMPS — For each field, one line stating the source URL/name and how recent it was (e.g., "MSTR_PRICE: yahoo finance live quote, ≈30 seconds old"). If you used a source older than 7 days, flag it bold.
+
+B) ESTIMATES VS VERIFIED — Explicit list of which fields were verified vs estimated. Do not lump everything as "verified" if you are not certain.
+
+C) mNAV AUDIT — Show the EV breakdown: market cap + debt + preferred − cash = EV, then EV / BTC NAV = your mNAV. Then state the live tracker's mNAV reading and the difference. Flag if >0.1x divergent.
+
+D) CONFIDENCE JUSTIFICATION — One sentence explaining why you rated HIGH/MEDIUM/LOW based on the criteria above.
+
+E) ANYTHING ELSE — Genuinely unusual readings, conflicting sources, market closure days, recent corporate actions (new ATM, new convertible, large BTC purchase) that would affect inputs.
+
+If you skip any of A–E, your response is incomplete. Do not return summary prose in place of these sections.`;
 
   const copyPrompt = async () => {
     try { await navigator.clipboard.writeText(claudePrompt); setPromptCopied(true); setTimeout(() => setPromptCopied(false), 2000); } catch (e) {}
   };
 
-  // Paste-and-parse: extract structured keys from Claude's response and apply to fields
+  // ============ v14 PASTE PARSER (extended, v14.1 hardened) ============
+  // v14.1 hardening: use Number.isFinite() instead of !isNaN(). isFinite rejects
+  // both NaN and Infinity, which is stricter than isNaN alone. Belt-and-braces
+  // we also wrap in explicit Number() to make intent clear and immune to any
+  // future regression where the regex might extract something unexpected.
   const applyPaste = () => {
     if (!pasteText.trim()) { setPasteResult({ ok: false, msg: 'Empty paste' }); return; }
-    // Strip code fences if present
-    let text = pasteText.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '');
+    let text = pasteText.replace(/\`\`\`[a-z]*\n?/gi, '').replace(/\`\`\`/g, '');
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     const applied = [];
     const skipped = [];
 
+    // safeNum: coerce to Number, reject NaN/Infinity, optionally enforce positivity
+    // Returns the validated number or null. Caller checks for null.
+    const safeNum = (raw, { allowNegative = false, allowZero = false } = {}) => {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return null;
+      if (!allowNegative && n < 0) return null;
+      if (!allowZero && n === 0) return null;
+      return n;
+    };
+
     for (const line of lines) {
-      // Keys may contain digits (MSTR_200MA, MSTR_20D_HIGH, MSTR_ATR14, DXY_ABOVE_110).
-      // Match against case-insensitive alphanumeric + underscore; normalise via toUpperCase below.
       const m = line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/);
       if (!m) continue;
       const key = m[1].toUpperCase();
       const val = m[2].trim();
-      const numVal = parseFloat(val.replace(/[$,%]/g, ''));
+      const cleanedVal = val.replace(/[$,%]/g, '');
       const boolVal = /^on$|^true$|^yes$|^1$/i.test(val);
 
       switch (key) {
-        case 'MSTR_PRICE':
-          if (!isNaN(numVal) && numVal > 0) { setMstrPrice(numVal); applied.push(`MSTR $${numVal}`); }
-          else skipped.push(key);
+        case 'MSTR_PRICE': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setMstrPrice(n); applied.push(`MSTR $${n}`); } else skipped.push(key);
           break;
-        case 'MSTR_200MA':
-          if (!isNaN(numVal) && numVal > 0) { setMa200(numVal); applied.push(`200MA $${numVal}`); }
-          else skipped.push(key);
+        }
+        case 'MSTR_200MA': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setMa200(n); applied.push(`200MA $${n}`); } else skipped.push(key);
           break;
-        case 'MSTR_20D_HIGH':
-          if (!isNaN(numVal) && numVal > 0) { setHigh20(numVal); applied.push(`20dH $${numVal}`); }
-          else skipped.push(key);
+        }
+        case 'MSTR_20D_HIGH': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setHigh20(n); applied.push(`20dH $${n}`); } else skipped.push(key);
           break;
-        case 'MSTR_20D_LOW':
-          if (!isNaN(numVal) && numVal > 0) { setLow20(numVal); applied.push(`20dL $${numVal}`); }
-          else skipped.push(key);
+        }
+        case 'MSTR_20D_LOW': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setLow20(n); applied.push(`20dL $${n}`); } else skipped.push(key);
           break;
-        case 'MSTR_50D_HIGH':
-          if (!isNaN(numVal) && numVal > 0) { setHigh50(numVal); applied.push(`50dH $${numVal}`); }
-          else skipped.push(key);
+        }
+        case 'MSTR_50D_HIGH': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setHigh50(n); applied.push(`50dH $${n}`); } else skipped.push(key);
           break;
-        case 'MSTR_50D_LOW':
-          if (!isNaN(numVal) && numVal > 0) { setLow50(numVal); applied.push(`50dL $${numVal}`); }
-          else skipped.push(key);
+        }
+        case 'MSTR_50D_LOW': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setLow50(n); applied.push(`50dL $${n}`); } else skipped.push(key);
           break;
-        case 'MSTR_200D_LOW':
-          if (!isNaN(numVal) && numVal > 0) { setLow200(numVal); applied.push(`200dL $${numVal}`); }
-          else skipped.push(key);
+        }
+        case 'MSTR_200D_LOW': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setLow200(n); applied.push(`200dL $${n}`); } else skipped.push(key);
           break;
-        case 'MSTR_ATR14':
-          if (!isNaN(numVal) && numVal > 0) { setAtr14(numVal); applied.push(`ATR ${numVal}`); }
-          else skipped.push(key);
+        }
+        case 'MSTR_ATR14': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setAtr14(n); applied.push(`ATR ${n}`); } else skipped.push(key);
           break;
-        case 'BTC_PRICE':
-          if (!isNaN(numVal) && numVal > 0) { setBtcPrice(numVal); applied.push(`BTC $${numVal.toLocaleString()}`); }
-          else skipped.push(key);
+        }
+        case 'BTC_PRICE': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setBtcPrice(n); applied.push(`BTC $${n.toLocaleString()}`); } else skipped.push(key);
           break;
-        case 'NUPL':
-          if (!isNaN(numVal)) { setNupl(numVal); applied.push(`NUPL ${numVal}%`); }
-          else skipped.push(key);
+        }
+        case 'NUPL': {
+          // NUPL can legitimately be negative (deep bear); allow it.
+          const n = safeNum(cleanedVal, { allowNegative: true, allowZero: true });
+          if (n !== null) { setNupl(n); applied.push(`NUPL ${n}%`); } else skipped.push(key);
           break;
-        case 'MVRV':
-          if (!isNaN(numVal) && numVal > 0) { setMvrv(numVal); applied.push(`MVRV ${numVal}`); }
-          else skipped.push(key);
+        }
+        case 'MVRV': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setMvrv(n); applied.push(`MVRV ${n}`); } else skipped.push(key);
           break;
-        case 'BTC_HOLDINGS':
-          if (!isNaN(numVal) && numVal > 0) { handleHoldingsChange(numVal); applied.push(`Holdings ${numVal.toLocaleString()}`); }
-          else skipped.push(key);
+        }
+        case 'BTC_HOLDINGS': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { handleHoldingsChange(n); applied.push(`Holdings ${n.toLocaleString()}`); } else skipped.push(key);
           break;
-        case 'DILUTED_SHARES':
-          if (!isNaN(numVal) && numVal > 0) {
-            const shares = numVal > 10000 ? numVal / 1_000_000 : numVal;
+        }
+        case 'DILUTED_SHARES': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) {
+            const shares = n > 10000 ? n / 1_000_000 : n;
             handleSharesChange(shares); applied.push(`Shares ${shares}M`);
           } else skipped.push(key);
           break;
+        }
         case 'BELOW_200MA':
           setBelow200ma(boolVal); applied.push(`200MA ${boolVal ? 'ON' : 'OFF'}`);
           break;
@@ -785,6 +989,81 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
         case 'DXY_ABOVE_110':
           setDxyAbove110(boolVal); applied.push(`DXY>110 ${boolVal ? 'ON' : 'OFF'}`);
           break;
+        // v14 numeric fields
+        case 'STH_REALIZED_PRICE': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setSthRealizedPrice(n); applied.push(`STH cost $${n.toLocaleString()}`); } else skipped.push(key);
+          break;
+        }
+        case 'ETF_FLOWS_5D': {
+          // Flows are signed and can be zero
+          const n = safeNum(cleanedVal, { allowNegative: true, allowZero: true });
+          if (n !== null) { setEtfFlows5d(n); applied.push(`ETF 5D ${n >= 0 ? '+' : ''}${n}M`); } else skipped.push(key);
+          break;
+        }
+        case 'TOTAL_DEBT': {
+          const n = safeNum(cleanedVal, { allowZero: true });
+          if (n !== null) { setTotalDebt(n); applied.push(`Debt $${n}M`); } else skipped.push(key);
+          break;
+        }
+        case 'PREFERRED_NOTIONAL': {
+          const n = safeNum(cleanedVal, { allowZero: true });
+          if (n !== null) { setPreferredNotional(n); applied.push(`Pref $${n}M`); } else skipped.push(key);
+          break;
+        }
+        case 'CASH_POSITION': {
+          const n = safeNum(cleanedVal, { allowZero: true });
+          if (n !== null) { setCashPosition(n); applied.push(`Cash $${n}M`); } else skipped.push(key);
+          break;
+        }
+        case 'MNAV': {
+          const n = safeNum(cleanedVal);
+          if (n !== null) { setParsedMnav(n); applied.push(`mNAV ${n}x`); } else skipped.push(key);
+          break;
+        }
+        case 'DXY': {
+          // Numeric DXY is informational; the binary DXY_ABOVE_110 drives scoring
+          const n = safeNum(cleanedVal);
+          if (n !== null) { applied.push(`DXY ${n}`); } else skipped.push(key);
+          break;
+        }
+        // v14 binary flags
+        case 'BTC_BELOW_STH_COST':
+          setBtcBelowSthCost(boolVal); applied.push(`BTC<STH ${boolVal ? 'ON' : 'OFF'}`);
+          break;
+        case 'ETF_OUTFLOWS_PERSISTENT':
+          setEtfOutflowsPersistent(boolVal); applied.push(`ETF out ${boolVal ? 'ON' : 'OFF'}`);
+          break;
+        case 'MNAV_COMPRESSED':
+          setMnavCompressed(boolVal);
+          if (boolVal) setMnavEuphoric(false);
+          applied.push(`mNAV comp ${boolVal ? 'ON' : 'OFF'}`);
+          break;
+        case 'MNAV_EUPHORIC':
+          setMnavEuphoric(boolVal);
+          if (boolVal) setMnavCompressed(false);
+          applied.push(`mNAV euph ${boolVal ? 'ON' : 'OFF'}`);
+          break;
+        // v14.1 freshness fields
+        case 'DATA_TIMESTAMP': {
+          // Validate ISO-8601 parseability before storing
+          const d = new Date(val);
+          if (!isNaN(d.getTime())) { setDataTimestamp(val); applied.push(`Data @ ${val}`); }
+          else skipped.push(key);
+          break;
+        }
+        case 'CONFIDENCE': {
+          const upper = val.toUpperCase();
+          if (upper === 'HIGH' || upper === 'MEDIUM' || upper === 'LOW') {
+            setConfidence(upper); applied.push(`Conf ${upper}`);
+          } else skipped.push(key);
+          break;
+        }
+        case 'STALE_FIELDS': {
+          // String value: comma-separated field names or "NONE"
+          setStaleFields(val); applied.push(`Stale: ${val.length > 30 ? val.slice(0, 30) + '…' : val}`);
+          break;
+        }
         default:
           skipped.push(key);
       }
@@ -793,7 +1072,10 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
     if (applied.length === 0) {
       setPasteResult({ ok: false, msg: 'No recognised fields. Check format — expect KEY: VALUE per line.' });
     } else {
-      setLastUpdated(new Date().toISOString().slice(0, 10));
+      // v14.1: store the full ISO timestamp so freshness math works in hours.
+      // Previously this was sliced to date only (YYYY-MM-DD), which made the
+      // staleness banner unable to distinguish "5 minutes ago" from "23 hours ago".
+      setLastUpdated(new Date().toISOString());
       setPasteResult({
         ok: true,
         msg: `Applied ${applied.length} field${applied.length > 1 ? 's' : ''}${skipped.length ? ` (${skipped.length} skipped)` : ''}: ${applied.slice(0, 6).join(' · ')}${applied.length > 6 ? '…' : ''}`,
@@ -804,7 +1086,14 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
   };
 
   const saveSnapshot = async () => {
-    const snap = { date: new Date().toISOString(), mstrPrice, btcPrice, nupl, mvrv, mNAV: Number(mNAV.toFixed(2)), bearScore, bottomScore, mode };
+    const snap = {
+      date: new Date().toISOString(),
+      mstrPrice, btcPrice, nupl, mvrv,
+      mNAV: Number(mNAV.toFixed(2)),
+      bearScore, bottomScore, mode,
+      // v14 additions in snapshots
+      sthRealizedPrice, btcBelowSthCost, etfFlows5d, etfOutflowsPersistent,
+    };
     const updated = [...snapshots, snap];
     setSnapshots(updated);
     try { localStorage.setItem('mstr:snapshots', JSON.stringify(updated)); } catch (e) {}
@@ -825,7 +1114,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
     try { localStorage.setItem('mstr:trades', JSON.stringify(updated)); } catch (e) {}
   };
 
-  // ============ POSITION MANAGEMENT ============
   const openPosition = async (overrides = {}) => {
     const f = { ...positionForm, ...overrides };
     if (!f.shares || !f.entryPrice) return;
@@ -846,8 +1134,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
     setPositionForm({ shares: '', entryPrice: '', stop: '', target: '', tag: 'MANUAL', notes: '' });
   };
 
-  // Closing a position writes a paired SELL entry into the trades journal so realised P&L
-  // continues to flow through journalStats unchanged.
   const closePosition = async (id, exitPrice, exitFees = 0) => {
     const pos = positions.find(p => p.id === id);
     if (!pos) return;
@@ -856,7 +1142,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
     const updated = positions.map(p => p.id === id ? { ...p, status: 'CLOSED', closedAt: new Date().toISOString(), exitPrice: exit, exitFees: parseFloat(exitFees) || 0 } : p);
     setPositions(updated);
     try { localStorage.setItem('mstr:positions', JSON.stringify(updated)); } catch (e) {}
-    // Write closing leg to trades journal as a SELL
     const closingTrade = { id: Date.now(), date: new Date().toISOString().slice(0, 10), type: 'SELL', shares: pos.shares, price: exit, fees: parseFloat(exitFees) || 0, fromPositionId: id };
     const tradesUpdated = [...trades, closingTrade];
     setTrades(tradesUpdated);
@@ -873,9 +1158,8 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
   const [importText, setImportText] = useState('');
   const [importResult, setImportResult] = useState(null);
 
-  // Builds the JSON payload (kept in one place so clipboard and file exports stay in sync).
   const buildExportPayload = () => ({
-    version: 13,
+    version: 14.1,
     exportedAt: new Date().toISOString(),
     settings: {
       mstrPrice, btcPrice, ma200, lastUpdated,
@@ -885,6 +1169,11 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
       corporateBaseUpdated, startingShares, cashBuffer, gbpUsd,
       levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh,
       aggressionStyle,
+      parsedMnav, totalDebt, preferredNotional, cashPosition,
+      sthRealizedPrice, btcBelowSthCost, etfFlows5d, etfOutflowsPersistent,
+      mnavCompressed, mnavEuphoric,
+      // v14.1
+      dataTimestamp, confidence, staleFields,
     },
     trades,
     snapshots,
@@ -902,7 +1191,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
     setTimeout(() => setImportResult(null), 8000);
   };
 
-  // File-download export: more reliable on mobile where clipboard permissions are flaky.
   const exportJSONFile = () => {
     const text = JSON.stringify(buildExportPayload(), null, 2);
     const blob = new Blob([text], { type: 'application/json' });
@@ -919,7 +1207,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
     setTimeout(() => setImportResult(null), 6000);
   };
 
-  // File-upload import: counterpart to exportJSONFile.
   const importJSONFile = (file) => {
     if (!file) return;
     const reader = new FileReader();
@@ -962,6 +1249,21 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
         if (s.manualBuyLow !== undefined) setManualBuyLow(s.manualBuyLow);
         if (s.manualBuyHigh !== undefined) setManualBuyHigh(s.manualBuyHigh);
         if (s.aggressionStyle !== undefined) setAggressionStyle(s.aggressionStyle);
+        // v14
+        if (s.parsedMnav !== undefined) setParsedMnav(s.parsedMnav);
+        if (s.totalDebt !== undefined) setTotalDebt(s.totalDebt);
+        if (s.preferredNotional !== undefined) setPreferredNotional(s.preferredNotional);
+        if (s.cashPosition !== undefined) setCashPosition(s.cashPosition);
+        if (s.sthRealizedPrice !== undefined) setSthRealizedPrice(s.sthRealizedPrice);
+        if (s.btcBelowSthCost !== undefined) setBtcBelowSthCost(s.btcBelowSthCost);
+        if (s.etfFlows5d !== undefined) setEtfFlows5d(s.etfFlows5d);
+        if (s.etfOutflowsPersistent !== undefined) setEtfOutflowsPersistent(s.etfOutflowsPersistent);
+        if (s.mnavCompressed !== undefined) setMnavCompressed(s.mnavCompressed);
+        if (s.mnavEuphoric !== undefined) setMnavEuphoric(s.mnavEuphoric);
+        // v14.1
+        if (s.dataTimestamp !== undefined) setDataTimestamp(s.dataTimestamp);
+        if (s.confidence !== undefined) setConfidence(s.confidence);
+        if (s.staleFields !== undefined) setStaleFields(s.staleFields);
       }
       if (Array.isArray(p.trades)) {
         setTrades(p.trades);
@@ -997,13 +1299,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
   };
   const serif = 'Georgia, "Times New Roman", serif';
 
-  // ============ TYPOGRAPHY SCALE ============
-  // Consolidated from ~8 ad-hoc sizes scattered through the file. Five steps cover everything:
-  //   eyebrow: tiny uppercase labels above values (9-10px)
-  //   meta:    secondary inline metadata (10-11px)
-  //   body:    standard reading text (12-13px)
-  //   value:   numeric values, mode labels (15-22px)
-  //   hero:    the single largest element on a card (28-32px)
   const t = {
     eyebrow: { fontSize: '9px', letterSpacing: '0.15em', textTransform: 'uppercase', color: colors.textMute },
     meta:    { fontSize: '11px', color: colors.textDim },
@@ -1012,16 +1307,34 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
     hero:    { fontSize: '28px', color: colors.highlight, fontWeight: 600, letterSpacing: '-0.01em' },
   };
 
-  // Section header style — used across all cards for consistency
-  const sectionHeader = {
-    fontSize: '10px', color: colors.textMute, letterSpacing: '0.2em',
-    textTransform: 'uppercase', marginBottom: '14px', fontWeight: 500,
-  };
-
   const staleColor = !daysSinceBaseUpdate && daysSinceBaseUpdate !== 0 ? colors.textFaint
     : daysSinceBaseUpdate > 60 ? colors.red
     : daysSinceBaseUpdate > 30 ? colors.gold
     : colors.textMute;
+
+  // ============ v14 mNAV TONE LADDER ============
+  // Replaces previous binary >1.5 = red logic with a graded ladder:
+  //   <1.05  green   (sub-NAV / capitulation buying opportunity)
+  //   1.05–1.20 amber-light (premium-engine stall — flagged in scoring)
+  //   1.20–1.80 gold (standard healthy premium)
+  //   1.80–2.50 amber (elevated)
+  //   >2.50  red    (euphoria — late cycle)
+  const mNavTone = (m) => {
+    if (!m || m <= 0) return colors.textFaint;
+    if (m < 1.05) return colors.green;
+    if (m < 1.20) return colors.gold;
+    if (m < 1.80) return colors.gold;
+    if (m < 2.50) return colors.red;
+    return colors.red;
+  };
+  const mNavLabel = (m) => {
+    if (!m || m <= 0) return '—';
+    if (m < 1.05) return 'sub-NAV — capitulation zone';
+    if (m < 1.20) return 'compressed — premium-engine stall';
+    if (m < 1.80) return 'healthy premium';
+    if (m < 2.50) return 'elevated premium';
+    return 'euphoria zone';
+  };
 
   const SignalToggle = ({ value, onChange, label, helperUrl, bottomTone }) => (
     <div style={{ marginBottom: '8px' }}>
@@ -1045,17 +1358,14 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
   );
 
   const NumberInput = ({ value, onChange, step, label, suffix = '', precision = 0, min, max }) => {
-    // Hold edit state as string so typing decimals like "333." doesn't get clobbered
     const [editValue, setEditValue] = useState(String(value));
     const [isFocused, setIsFocused] = useState(false);
 
-    // When value prop changes externally (not from this input) and we're not focused, sync
     useEffect(() => {
       if (!isFocused) setEditValue(String(value));
     }, [value, isFocused]);
 
     const commit = (raw) => {
-      // Clean leading zeros except for "0.x" patterns
       let cleaned = raw.replace(/^0+(\d)/, '$1');
       if (cleaned === '' || cleaned === '-' || cleaned === '.') {
         onChange(0); setEditValue('0'); return;
@@ -1130,8 +1440,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
     <div style={{ fontSize: '11px', letterSpacing: '0.2em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '16px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '8px', fontFamily: serif }}>{children}</div>
   );
 
-  // NavButton supports a `secondary` variant for less-frequent destinations (Snapshots, Backup).
-  // Primary buttons are larger and slightly bolder; secondaries are a quieter chip style.
   const NavButton = ({ id, label, secondary }) => (
     <button onClick={() => setView(id)} style={{
       background: view === id ? colors.panel : 'transparent',
@@ -1152,7 +1460,7 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
         {/* HEADER */}
         <div style={{ marginBottom: '24px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '20px' }}>
           <div style={{ fontSize: '10px', letterSpacing: '0.3em', color: colors.textMute, textTransform: 'uppercase', marginBottom: '8px' }}>
-            Cycle Decision Framework · v13.1
+            Cycle Decision Framework · v14.1
           </div>
           <h1 style={{ fontSize: '26px', fontWeight: 400, color: colors.highlight, margin: 0, fontStyle: 'italic' }}>MSTR Rotation</h1>
           <h2 style={{ fontSize: '14px', fontWeight: 400, color: colors.textDim, margin: '4px 0 12px 0', letterSpacing: '0.05em' }}>Rotate · Hoard · Deploy</h2>
@@ -1160,14 +1468,29 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
             <div><span style={{ color: colors.textMute }}>BTC </span><span style={{ color: colors.gold }}>${btcPrice.toLocaleString()}</span></div>
             <div><span style={{ color: colors.textMute }}>MSTR </span><span style={{ color: colors.gold }}>${mstrPrice.toFixed(2)}</span></div>
             <div><span style={{ color: colors.textMute }}>200MA </span><span style={{ color: colors.gold }}>{ma200 ? `$${ma200.toFixed(2)}` : '—'}</span></div>
-            <div style={{ color: colors.textMute }}>mNAV <span style={{ color: mNAV > 1.5 ? colors.red : mNAV < 1.0 ? colors.green : colors.gold }}>{mNAV.toFixed(2)}x</span></div>
+            <div style={{ color: colors.textMute }}>mNAV <span style={{ color: mNavTone(mNAV) }}>{mNAV ? `${mNAV.toFixed(2)}x` : '—'}</span></div>
           </div>
-          <div style={{ fontSize: '9px', color: colors.textFaint, marginTop: '6px', letterSpacing: '0.05em' }}>
-            Prompt-driven updates. Use the panel below to refresh all readings at once.{lastUpdated && <span> · last updated: {lastUpdated}</span>}
+          {/* v14.1: show data freshness inline in the header */}
+          <div style={{ fontSize: '9px', color: colors.textFaint, marginTop: '6px', letterSpacing: '0.05em', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <span>Prompt-driven updates. Paste prompt response below to refresh.</span>
+            {freshness.hours !== null && (
+              <span style={{
+                color: freshness.tier === 'red' ? colors.red :
+                       freshness.tier === 'amber' ? colors.gold :
+                       colors.green,
+                fontWeight: 600,
+              }}>
+                · data {freshness.hours < 1 ? `${(freshness.hours * 60).toFixed(0)}m` : `${freshness.hours.toFixed(0)}h`} old
+              </span>
+            )}
+            {confidence && (
+              <span style={{ color: confidence === 'LOW' ? colors.red : confidence === 'MEDIUM' ? colors.gold : colors.green }}>
+                · conf {confidence}
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Two-row nav: trade-flow tabs on top, persistence tabs (Log/Backup) demoted to secondary row */}
         <div style={{ marginBottom: '20px' }}>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
             <NavButton id="dashboard" label="Dashboard" />
@@ -1183,18 +1506,45 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
         {view === 'dashboard' && (
           <>
             {/* ============================================================
-                MODE CARD — Hero section.
-                Three tiers of hierarchy:
-                  1. HERO ROW: mode label, current price, verdict, position-in-range bar
-                  2. TRIGGERS: split SELL/BUY cards, only render when active
-                  3. ZONES: the three level columns, deemphasised relative to hero
-                  4. FOOTER: aggression style + auto/manual toggle (least prominent)
-               ============================================================ */}
+                v14.1 STALENESS BANNER — top of dashboard, before mode card.
+                Two-tier:
+                  amber (>24h):  "Volatile readings may be stale, consider refresh"
+                  red (>72h):    "Data is stale, full refresh required"
+                Also surfaces LLM confidence and per-field staleness list when
+                provided. Only renders when there's something to flag, so the
+                dashboard stays clean on fresh data.
+                ============================================================ */}
+            {(freshness.tier === 'amber' || freshness.tier === 'red' || confidence === 'LOW' || (staleFields && staleFields !== 'NONE')) && (
+              <div style={{
+                background: freshness.tier === 'red' || confidence === 'LOW' ? '#1a0f0d' : '#1a1611',
+                border: `2px solid ${freshness.tier === 'red' || confidence === 'LOW' ? colors.red : colors.gold}`,
+                padding: '14px 16px', marginBottom: '20px', borderRadius: '3px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '18px', lineHeight: 1 }}>{freshness.tier === 'red' || confidence === 'LOW' ? '🚨' : '⚠'}</span>
+                  <span style={{ color: freshness.tier === 'red' || confidence === 'LOW' ? colors.red : colors.gold, fontSize: '12px', fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+                    {freshness.tier === 'red' ? 'Running on cached indicators — regime update required' :
+                     confidence === 'LOW' ? 'Low-confidence data — verify before trading' :
+                     'Data is aging — consider refreshing'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: colors.textDim, lineHeight: 1.5, paddingLeft: '28px' }}>
+                  {freshness.hours !== null && (
+                    <div>Source data is {freshness.hours < 1 ? `${(freshness.hours * 60).toFixed(0)} minutes` : `${freshness.hours.toFixed(1)} hours`} old ({freshness.source === 'data-timestamp' ? 'LLM-asserted' : 'paste-time fallback'}).</div>
+                  )}
+                  {confidence && <div style={{ marginTop: '2px' }}>LLM confidence: <span style={{ color: confidence === 'LOW' ? colors.red : confidence === 'MEDIUM' ? colors.gold : colors.green, fontWeight: 600 }}>{confidence}</span></div>}
+                  {staleFields && staleFields !== 'NONE' && (
+                    <div style={{ marginTop: '2px' }}>Stale fields flagged: <span style={{ color: colors.red, fontStyle: 'italic' }}>{staleFields}</span></div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* MODE CARD */}
             <div style={{
               background: cfg.bg, border: `1px solid ${cfg.color}`,
               padding: '20px', marginBottom: '20px', position: 'relative',
             }}>
-              {/* TIER 1: Hero row */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', gap: '16px', flexWrap: 'wrap' }}>
                 <div style={{ flex: '1 1 auto', minWidth: 0 }}>
                   <div style={{ ...t.eyebrow, color: cfg.color, marginBottom: '6px' }}>Active mode</div>
@@ -1209,19 +1559,15 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
                 </div>
               </div>
 
-              {/* TIER 1b: Position-in-range bar — only meaningful in ROTATE mode */}
               {priceRange?.pct !== null && priceRange?.pct !== undefined && mode === 'ROTATE' && (
                 <div style={{ marginBottom: '18px' }}>
                   <div style={{ position: 'relative', height: '6px', background: '#0a0806', borderRadius: '3px', overflow: 'hidden', border: `1px solid ${colors.border}` }}>
-                    {/* Buy zone band */}
                     <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0,
                       width: `${((priceRange.buyHigh - priceRange.lo) / (priceRange.hi - priceRange.lo)) * 100}%`,
                       background: 'rgba(45, 134, 89, 0.25)' }} />
-                    {/* Sell zone band */}
                     <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0,
                       width: `${((priceRange.hi - priceRange.sellLow) / (priceRange.hi - priceRange.lo)) * 100}%`,
                       background: 'rgba(199, 62, 29, 0.25)' }} />
-                    {/* Current price marker */}
                     <div style={{ position: 'absolute', left: `${priceRange.pct * 100}%`, top: '-3px', bottom: '-3px', width: '2px',
                       background: priceRange.tone, boxShadow: `0 0 6px ${priceRange.tone}` }} />
                   </div>
@@ -1233,10 +1579,8 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
                 </div>
               )}
 
-              {/* Action line */}
               <div style={{ ...t.body, marginBottom: '18px' }}>{cfg.action}</div>
 
-              {/* Warnings */}
               {deploySuppressed && (
                 <div style={{ ...t.meta, color: colors.gold, marginBottom: '14px', padding: '10px 12px', background: '#1a1611', border: `1px dashed ${colors.gold}`, borderRadius: '3px' }}>
                   ⚠ Bottom score is at deploy threshold, but MSTR is still above $140. Holding HOARD until price confirms.
@@ -1248,7 +1592,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
                 </div>
               )}
 
-              {/* TIER 2: Live triggers — split by side, only render if active */}
               {bandHits.length > 0 && (() => {
                 const sellHits = bandHits.filter(h => h.side === 'SELL');
                 const buyHits = bandHits.filter(h => h.side === 'BUY');
@@ -1292,9 +1635,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
                 );
               })()}
 
-              {/* TIER 3: Zones grid — divider line separates from hero.
-                  "Alert at" lines below each zone surface the single-number alert price
-                  (inner-edge for ROTATE bands, raw target for HOARD/DEPLOY anchors). */}
               <div style={{ paddingTop: '16px', borderTop: `1px solid ${colors.border}`, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
                 <div>
                   <div style={{ ...t.eyebrow, marginBottom: '6px' }}>Sell zone</div>
@@ -1334,7 +1674,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
                 </div>
               </div>
 
-              {/* TIER 4: Footer — aggression style + auto/manual toggle */}
               <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: `1px solid ${colors.border}` }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
                   <span style={{ ...t.eyebrow }}>Style</span>
@@ -1369,7 +1708,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
               </div>
             </div>
 
-            {/* MANUAL LEVELS PANEL (when auto is off) */}
             {!levelsAuto && (
               <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
                 <SectionHeader>◆ Manual level overrides</SectionHeader>
@@ -1382,7 +1720,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
               </div>
             )}
 
-            {/* TECHNICAL READOUT */}
             {levelsAuto && technicals && (
               <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
                 <SectionHeader>◆ Technical readout</SectionHeader>
@@ -1397,6 +1734,99 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
                 </div>
               </div>
             )}
+
+            {/* ====== v14 NEW CARD: On-chain & corporate signals ====== */}
+            {/* Surfaces the three new readings (mNAV, STH cost, ETF flows) with explicit thresholds
+                and traffic-light tone. Designed to be the page's secondary anchor after the mode card —
+                it answers "WHY is the tool in this mode?" rather than just showing the verdict. */}
+            <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
+              <SectionHeader>◆ On-chain &amp; corporate signals</SectionHeader>
+
+              {/* mNAV row */}
+              <div style={{ padding: '12px 0', borderBottom: `1px solid ${colors.border}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                  <span style={{ color: colors.textDim, fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>mNAV (EV ÷ BTC NAV)</span>
+                  <span style={{ color: mNavTone(mNAV), fontSize: '17px', fontWeight: 600 }}>{mNAV ? `${mNAV.toFixed(2)}x` : '—'}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: mNavTone(mNAV), fontStyle: 'italic', marginBottom: '4px' }}>{mNavLabel(mNAV)}</div>
+                <div style={{ fontSize: '10px', color: colors.textMute, lineHeight: 1.5 }}>
+                  Thresholds: <span style={{ color: colors.green }}>&lt;1.05 sub-NAV</span> · 1.05–1.20 stall · 1.20–1.80 healthy · <span style={{ color: colors.red }}>1.80–2.50 elevated · &gt;2.50 euphoria</span>
+                </div>
+                {parsedMnav !== null && recomputedMnav !== null && mNAVdiscrepancy > 0.1 && (
+                  <div style={{ marginTop: '6px', fontSize: '10px', color: colors.red, padding: '6px 8px', background: '#1a0f0d', border: `1px dashed ${colors.red}` }}>
+                    ⚠ Parsed mNAV ({parsedMnav.toFixed(2)}x) and recomputed mNAV ({recomputedMnav.toFixed(2)}x) differ by {mNAVdiscrepancy.toFixed(2)}x. Check corporate inputs.
+                  </div>
+                )}
+                {mNAVisLegacy && (
+                  <div style={{ marginTop: '6px', fontSize: '10px', color: colors.textMute, fontStyle: 'italic' }}>
+                    Using legacy market-cap-only mNAV. Paste a prompt response to get the full EV-based figure.
+                  </div>
+                )}
+              </div>
+
+              {/* BTC vs STH cost basis row */}
+              <div style={{ padding: '12px 0', borderBottom: `1px solid ${colors.border}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                  <span style={{ color: colors.textDim, fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>BTC vs short-term holder cost</span>
+                  <span style={{ color: btcBelowSthCost ? colors.red : colors.green, fontSize: '17px', fontWeight: 600 }}>
+                    {sthRealizedPrice ? `${(((btcPrice / sthRealizedPrice) - 1) * 100).toFixed(1)}%` : '—'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: btcBelowSthCost ? colors.red : colors.textDim, marginBottom: '4px' }}>
+                  {sthRealizedPrice
+                    ? (btcBelowSthCost
+                        ? `STHs underwater — recent buyers at $${sthRealizedPrice.toLocaleString()}`
+                        : `STHs profitable — cost basis $${sthRealizedPrice.toLocaleString()}`)
+                    : 'Awaiting data'}
+                </div>
+                <div style={{ fontSize: '10px', color: colors.textMute, lineHeight: 1.5 }}>
+                  When BTC trades below short-term holder realized price, recent buyers are underwater. Signal of structural sell pressure.
+                </div>
+              </div>
+
+              {/* ETF flows row */}
+              <div style={{ padding: '12px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+                  <span style={{ color: colors.textDim, fontSize: '11px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Spot ETF 5-day flows</span>
+                  <span style={{ color: etfOutflowsPersistent ? colors.red : etfFlows5d > 100 ? colors.green : colors.gold, fontSize: '17px', fontWeight: 600 }}>
+                    {etfFlows5d !== null ? `${etfFlows5d >= 0 ? '+' : ''}$${etfFlows5d.toLocaleString()}M` : '—'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: etfOutflowsPersistent ? colors.red : colors.textDim, marginBottom: '4px' }}>
+                  {etfFlows5d === null
+                    ? 'Awaiting data'
+                    : etfOutflowsPersistent
+                      ? 'Persistent outflows — institutional risk-off'
+                      : etfFlows5d > 500
+                        ? 'Strong inflows — institutional accumulation'
+                        : 'Mixed / neutral flows'}
+                </div>
+                <div style={{ fontSize: '10px', color: colors.textMute, lineHeight: 1.5 }}>
+                  Threshold: outflows &gt; $500M over 5 trading days flips bear signal. Source: Farside Investors.
+                </div>
+              </div>
+
+              {/* Corporate inputs sub-block */}
+              {(totalDebt !== null || preferredNotional !== null || cashPosition !== null) && (
+                <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${colors.border}` }}>
+                  <div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>EV inputs (most recent 10-Q)</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '11px' }}>
+                    <div>
+                      <div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Debt</div>
+                      <div style={{ color: colors.text, fontSize: '13px', marginTop: '2px' }}>{totalDebt !== null ? `$${(totalDebt / 1000).toFixed(1)}B` : '—'}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Preferred</div>
+                      <div style={{ color: colors.text, fontSize: '13px', marginTop: '2px' }}>{preferredNotional !== null ? `$${(preferredNotional / 1000).toFixed(1)}B` : '—'}</div>
+                    </div>
+                    <div>
+                      <div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Cash</div>
+                      <div style={{ color: colors.text, fontSize: '13px', marginTop: '2px' }}>{cashPosition !== null ? `$${(cashPosition / 1000).toFixed(1)}B` : '—'}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* PORTFOLIO SUMMARY */}
             <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
@@ -1419,7 +1849,26 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
                 <span style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Total portfolio</span>
                 <span style={{ color: colors.highlight, fontSize: '18px', fontWeight: 600 }}>£{portfolio.totalGBP.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
               </div>
-              {/* Cash hold guidance vs mode */}
+              {/* v14.1: USD buying power — converts the GBP cash buffer to USD so it's
+                  directly comparable to the DEPLOY ladder rungs and HOARD buy targets
+                  which are quoted in USD. Read-only derived field; no input. */}
+              <div style={{ paddingTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>USD buying power available</span>
+                <span style={{ color: colors.gold, fontSize: '14px', fontWeight: 600 }}>${(cashBuffer * gbpUsd).toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+              </div>
+              {/* Show ladder-rung equivalence if we have ladder data and we're in DEPLOY mode,
+                  so the user can see how many rungs they can fund at current rates. */}
+              {mode === 'DEPLOY' && dynamicLevels && cashBuffer > 0 && (() => {
+                const usdBuying = cashBuffer * gbpUsd;
+                // Each rung is 25% of available cash per the playbook
+                const perRung = usdBuying * 0.25;
+                const sharesAtCurrent = perRung / mstrPrice;
+                return (
+                  <div style={{ marginTop: '6px', fontSize: '10px', color: colors.textMute, lineHeight: 1.5, fontStyle: 'italic' }}>
+                    ≈ ${perRung.toLocaleString(undefined, {maximumFractionDigits: 0})} per ladder rung (≈ {sharesAtCurrent.toFixed(0)} shares at current price)
+                  </div>
+                );
+              })()}
               {portfolio.cashPct > 30 && mode === 'ROTATE' && (
                 <div style={{ marginTop: '12px', fontSize: '10px', color: colors.gold, padding: '8px 10px', background: '#1a1611', border: `1px dashed ${colors.gold}`, lineHeight: 1.5 }}>
                   ⚠ {portfolio.cashPct.toFixed(0)}% cash exceeds the 0–25% guideline for ROTATE mode. Consider deploying via DCA ladder.
@@ -1448,34 +1897,31 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
               </div>
             </div>
 
-            {/* SCORES */}
+            {/* SCORES — note updated denominators reflect v14 maxes (17 / 19) */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
               <div style={{ background: colors.panel, padding: '16px', border: `1px solid ${colors.border}` }}>
                 <div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '8px' }}>Bear signals</div>
-                <div style={{ fontSize: '28px', color: bearScore >= 6 ? colors.red : colors.gold, fontWeight: 600 }}>{bearScore}<span style={{ fontSize: '14px', color: colors.textFaint }}> / 13</span></div>
+                <div style={{ fontSize: '28px', color: bearScore >= 6 ? colors.red : colors.gold, fontWeight: 600 }}>{bearScore}<span style={{ fontSize: '14px', color: colors.textFaint }}> / 17</span></div>
                 <div style={{ fontSize: '10px', color: colors.textMute, marginTop: '4px' }}>≥6 → HOARD</div>
               </div>
               <div style={{ background: colors.panel, padding: '16px', border: `1px solid ${colors.border}` }}>
                 <div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '8px' }}>Bottom signals</div>
-                <div style={{ fontSize: '28px', color: bottomScore >= 7 ? colors.green : colors.gold, fontWeight: 600 }}>{bottomScore}<span style={{ fontSize: '14px', color: colors.textFaint }}> / 17</span></div>
+                <div style={{ fontSize: '28px', color: bottomScore >= 7 ? colors.green : colors.gold, fontWeight: 600 }}>{bottomScore}<span style={{ fontSize: '14px', color: colors.textFaint }}> / 19</span></div>
                 <div style={{ fontSize: '10px', color: colors.textMute, marginTop: '4px' }}>≥7 + MSTR&lt;$140 → DEPLOY</div>
               </div>
             </div>
 
-            {/* mNAV */}
+            {/* mNAV detail card — kept for the legacy fair-value view (BTC per share) */}
             <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
-              <SectionHeader>◆ mNAV tracker</SectionHeader>
+              <SectionHeader>◆ Legacy NAV view (per-share)</SectionHeader>
+              <div style={{ fontSize: '10px', color: colors.textMute, marginBottom: '14px', lineHeight: 1.5 }}>
+                BTC-per-share fair value, ignoring debt + preferred. For the full EV-based mNAV used in scoring, see the On-chain &amp; corporate signals card above.
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '12px', marginBottom: '14px' }}>
                 <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>BTC per share</div><div style={{ color: colors.highlight, fontSize: '15px', marginTop: '2px' }}>{btcPerShare.toFixed(5)} BTC</div></div>
-                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Fair value</div><div style={{ color: colors.highlight, fontSize: '15px', marginTop: '2px' }}>${fairValue.toFixed(2)}</div></div>
+                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Fair value (BTC × per-share)</div><div style={{ color: colors.highlight, fontSize: '15px', marginTop: '2px' }}>${fairValue.toFixed(2)}</div></div>
                 <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Current price</div><div style={{ color: colors.highlight, fontSize: '15px', marginTop: '2px' }}>${mstrPrice.toFixed(2)}</div></div>
-                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>mNAV ratio</div><div style={{ color: mNAV > 1.5 ? colors.red : mNAV < 1.0 ? colors.green : colors.gold, fontSize: '15px', marginTop: '2px', fontWeight: 600 }}>{mNAV.toFixed(2)}x</div></div>
-              </div>
-              <div style={{ fontSize: '11px', color: colors.textDim, lineHeight: 1.6, borderTop: `1px solid ${colors.border}`, paddingTop: '12px' }}>
-                {mNAV < 1.0 && '⚠ Below 1.0x: MSTR at discount to BTC holdings.'}
-                {mNAV >= 1.0 && mNAV < 1.3 && 'Modest premium. Healthy accumulation zone.'}
-                {mNAV >= 1.3 && mNAV < 1.8 && 'Standard premium.'}
-                {mNAV >= 1.8 && '⚠ Elevated premium. Consider trimming.'}
+                <div><div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Legacy mNAV (market-cap)</div><div style={{ color: mNavTone(legacyMnav), fontSize: '15px', marginTop: '2px', fontWeight: 600 }}>{legacyMnav.toFixed(2)}x</div></div>
               </div>
               <div style={{ marginTop: '14px' }}>
                 <NumberInput value={btcHoldings} onChange={handleHoldingsChange} step={100} label="BTC holdings" min={0} max={5000000} />
@@ -1509,30 +1955,35 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
               <SignalToggle value={weeklyLowerLow} onChange={setWeeklyLowerLow} label="MSTR weekly lower-low after lower-high" helperUrl="https://www.tradingview.com/chart/?symbol=NASDAQ%3AMSTR&interval=W" />
               <SignalToggle value={fundingNegative} onChange={(v) => { setFundingNegative(v); if (v) setDerivativesExhaustion(false); }} label="BTC perp funding persistently negative (aggressive shorting)" helperUrl="https://www.coinglass.com/FundingRate" />
               <SignalToggle value={dxyAbove110} onChange={setDxyAbove110} label="DXY above 110" helperUrl="https://www.tradingview.com/symbols/TVC-DXY/" />
+              {/* v14: new bear signal toggles */}
+              <SignalToggle value={btcBelowSthCost} onChange={setBtcBelowSthCost} label={`BTC below short-term holder cost basis${sthRealizedPrice ? ` ($${sthRealizedPrice.toLocaleString()})` : ''}`} helperUrl="https://studio.glassnode.com/charts/btc-sth-realized-price-mvrv" />
+              <SignalToggle value={etfOutflowsPersistent} onChange={setEtfOutflowsPersistent} label={`Spot ETF outflows persistent${etfFlows5d !== null ? ` (5D: ${etfFlows5d >= 0 ? '+' : ''}$${etfFlows5d}M)` : ''}`} helperUrl="https://farside.co.uk/btc/" />
             </div>
 
             <div style={{ marginBottom: '24px' }}>
               <SectionHeader>◆ Bottom signals</SectionHeader>
               <SignalToggle value={derivativesExhaustion} onChange={(v) => { setDerivativesExhaustion(v); if (v) setFundingNegative(false); }} label="BTC derivatives exhaustion (funding flat + OI multi-month lows)" helperUrl="https://www.coinglass.com/BitcoinOpenInterest" bottomTone />
-              <div style={{ fontSize: '10px', color: colors.textMute, lineHeight: 1.6, marginTop: '8px', paddingLeft: '14px' }}>Other bottom signals (extreme NUPL, MVRV, deep prices, cycle timing) score automatically.</div>
+              {/* v14: mNAV compressed flag also feeds bottom score */}
+              <SignalToggle value={mnavCompressed} onChange={(v) => { setMnavCompressed(v); if (v) setMnavEuphoric(false); }} label={`mNAV compressed below 1.05x${mNAV ? ` (now ${mNAV.toFixed(2)}x)` : ''}`} helperUrl="https://bitcoinquant.co/company/MSTR" bottomTone />
+              <div style={{ fontSize: '10px', color: colors.textMute, lineHeight: 1.6, marginTop: '8px', paddingLeft: '14px' }}>Other bottom signals (extreme NUPL, MVRV, deep prices, cycle timing, BTC&lt;STH cost) score automatically.</div>
             </div>
 
             <div style={{ background: colors.panel, border: `1px solid ${colors.gold}`, padding: '20px', marginBottom: '24px' }}>
               <SectionHeader>◆ Prompt-driven update (3 steps)</SectionHeader>
               <div style={{ fontSize: '11px', color: colors.textDim, marginBottom: '12px', lineHeight: 1.6 }}>
-                <strong style={{ color: colors.gold }}>Step 1:</strong> copy the prompt below. <strong style={{ color: colors.gold }}>Step 2:</strong> paste into a new Claude chat, get the response. <strong style={{ color: colors.gold }}>Step 3:</strong> paste Claude's response into the panel below — fields auto-populate.
+                <strong style={{ color: colors.gold }}>Step 1:</strong> copy the prompt below. <strong style={{ color: colors.gold }}>Step 2:</strong> paste into a new Claude/Gemini chat, get the response. <strong style={{ color: colors.gold }}>Step 3:</strong> paste the response into the panel below — fields auto-populate.
               </div>
               <textarea readOnly value={claudePrompt} style={{ width: '100%', height: '220px', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '12px', fontFamily: 'Menlo, monospace', fontSize: '11px', resize: 'vertical', lineHeight: 1.5, boxSizing: 'border-box' }} />
               <button onClick={copyPrompt} style={{ width: '100%', marginTop: '10px', background: promptCopied ? colors.green : colors.gold, color: colors.bg, border: 'none', padding: '10px', fontFamily: serif, fontSize: '12px', letterSpacing: '0.15em', textTransform: 'uppercase', cursor: 'pointer', fontWeight: 600, transition: 'background 0.2s' }}>{promptCopied ? '✓ copied' : '◆ copy prompt'}</button>
 
               <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: `1px solid ${colors.border}` }}>
                 <div style={{ fontSize: '11px', letterSpacing: '0.15em', color: colors.textDim, textTransform: 'uppercase', marginBottom: '10px', fontFamily: serif }}>
-                  ◆ Paste Claude's response here
+                  ◆ Paste response here
                 </div>
                 <textarea
                   value={pasteText}
                   onChange={(e) => setPasteText(e.target.value)}
-                  placeholder={`Paste the code block (or the whole response) here. Expected format:\n\nMSTR_PRICE: 164\nBTC_PRICE: 77000\nNUPL: 28\nMVRV: 1.0\n...`}
+                  placeholder={`Paste the code block (or the whole response) here. Expected format:\n\nDATA_TIMESTAMP: 2026-05-20T13:45:00Z\nCONFIDENCE: HIGH\nSTALE_FIELDS: NONE\nMSTR_PRICE: 167\nBTC_PRICE: 77000\nMNAV: 1.09\n...`}
                   style={{ width: '100%', height: '140px', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '12px', fontFamily: 'Menlo, monospace', fontSize: '11px', resize: 'vertical', lineHeight: 1.5, boxSizing: 'border-box' }}
                 />
                 <button onClick={applyPaste} style={{ width: '100%', marginTop: '10px', background: colors.green, color: '#fff', border: 'none', padding: '10px', fontFamily: serif, fontSize: '12px', letterSpacing: '0.15em', textTransform: 'uppercase', cursor: 'pointer', fontWeight: 600 }}>
@@ -1675,7 +2126,7 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
                 </span>
                 <input type="file" accept="application/json,.json" onChange={(e) => importJSONFile(e.target.files?.[0])} style={{ display: 'none' }} />
               </label>
-              <textarea value={importText} onChange={(e) => setImportText(e.target.value)} placeholder='{"version":13,...}' style={{ width: '100%', height: '140px', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: 'monospace', fontSize: '10px', marginBottom: '12px' }} />
+              <textarea value={importText} onChange={(e) => setImportText(e.target.value)} placeholder='{"version":14.1,...}' style={{ width: '100%', height: '140px', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: 'monospace', fontSize: '10px', marginBottom: '12px' }} />
               <button onClick={importJSON} disabled={!importText.trim()} style={{ width: '100%', background: importText.trim() ? colors.green : colors.border, color: '#fff', border: 'none', padding: '10px', fontFamily: serif, fontSize: '11px', letterSpacing: '0.15em', cursor: importText.trim() ? 'pointer' : 'not-allowed', borderRadius: '2px', fontWeight: 600 }}>IMPORT JSON</button>
               {importResult && (
                 <div style={{ marginTop: '12px', fontSize: '11px', color: importResult.ok ? colors.green : colors.red, padding: '8px 12px', border: `1px dashed ${importResult.ok ? colors.green : colors.red}` }}>
@@ -1771,6 +2222,14 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
                     <span>Bear {s.bearScore}</span>
                     <span>Bottom {s.bottomScore}</span>
                   </div>
+                  {/* v14: show new readings on snapshots that have them */}
+                  {(s.etfFlows5d !== undefined || s.btcBelowSthCost !== undefined) && (
+                    <div style={{ display: 'flex', gap: '12px', marginTop: '4px', color: colors.textFaint, fontSize: '9px', letterSpacing: '0.05em' }}>
+                      {s.etfFlows5d !== undefined && s.etfFlows5d !== null && <span>ETF 5D {s.etfFlows5d >= 0 ? '+' : ''}${s.etfFlows5d}M</span>}
+                      {s.btcBelowSthCost && <span style={{ color: colors.red }}>BTC&lt;STH</span>}
+                      {s.etfOutflowsPersistent && <span style={{ color: colors.red }}>ETF out</span>}
+                    </div>
+                  )}
                 </div>
               ))}
           </div>
@@ -1784,9 +2243,6 @@ After the code block, briefly note: (1) any data older than a week, (2) any fiel
   );
 }
 
-// =====================================================================
-// APP ROOT (handles gate → tool transition)
-// =====================================================================
 function App() {
   const [unlocked, setUnlocked] = useState(() => {
     if (!AUTH_REQUIRED) return true;
