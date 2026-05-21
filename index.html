@@ -10,7 +10,7 @@
 
 <!--
   =================================================================
-  MSTR CYCLE DECISION FRAMEWORK · v14.4 (web build)
+  MSTR CYCLE DECISION FRAMEWORK · v14.4 (web build) — prompt v2
   =================================================================
 
   CHANGES IN v14.4 vs v14.3
@@ -75,6 +75,21 @@
      - Fix: deleteTrade function added, mirroring deleteSnapshot/
        deletePosition patterns — filters by id, updates state and
        localStorage.
+
+  PROMPT v2 CHANGES
+  -----------------
+  - Phase 3 rewritten as mandatory step-by-step math audit.
+  - EV formula units clarified: TOTAL_DEBT / PREFERRED_NOTIONAL /
+    CASH_POSITION are in millions — explicit ×1,000,000 in each step.
+  - BTC_NAV formula corrected: BTC_HOLDINGS × BTC_PRICE (raw USD),
+    no division. Previous formula divided by 1M unnecessarily.
+  - Step 3.5 added: optional tracker cross-check (bitcoinquant.co /
+    VanEck) — read-only audit only, never overrides Step 3.4 result.
+  - bitcoinquant.co added to Phase 2 source list as "read-only audit only".
+  - MNAV field rule updated: must match Step 3.4 exactly.
+  - HIGH confidence criteria: MNAV must match recomputed figure.
+  - POST-BLOCK section C expanded: full step-by-step math required,
+    plus tracker cross-check result must be stated.
 
   SCORE CEILINGS: unchanged from v14.3 (bear max 20, bottom max 20).
   ALL THRESHOLDS: unchanged from v14.3.
@@ -394,7 +409,7 @@ function MSTRCycleTool() {
     else if (mvrv >= 2.0) { zone = 'Distribution — late-cycle elevated'; zoneColor = '#c73e1d'; }
     else if (mvrv >= 1.5) { zone = 'Caution — premium above fair value'; zoneColor = '#d4a017'; }
     else if (mvrv >= 1.0) { zone = 'Healthy — within normal range';      zoneColor = '#d4a017'; }
-    else if (mvrv >= 0.8) { zone = 'Compressed — approaching floor';     zoneColor: '#2d8659'; zoneColor = '#2d8659'; }
+    else if (mvrv >= 0.8) { zone = 'Compressed — approaching floor';     zoneColor = '#2d8659'; }
     else                  { zone = 'Capitulation — below cost basis';    zoneColor = '#2d8659'; }
     const pctToFloor = Math.max(0, ((mvrv - MVRV_FLOOR) / (MVRV_PEAK - MVRV_FLOOR)) * 100);
     return { progress, zone, zoneColor, pctToFloor };
@@ -638,35 +653,26 @@ function MSTRCycleTool() {
   }, [dynamicLevels, mstrPrice, mode]);
 
   // ============ BF1: JOURNAL STATS — STRICT ROTATION PAIR ACCOUNTING ============
-  // Only BUY legs that close an open SELL leg contribute to rotationCostBasis
-  // and rotationShares. Direct BUYs (no pending SELL) increment currentShares
-  // but are excluded from rotation metrics. If no pairs completed, costPerExtraShare
-  // is null and the UI renders a clean "Awaiting completed cycle…" message.
   const journalStats = useMemo(() => {
     let currentShares = startingShares;
     let totalCash = 0;
     let rotationShares = 0;
     let rotationCostBasis = 0;
     let completedRotations = 0;
-    let pendingSell = null; // { shares, price, proceeds }
+    let pendingSell = null;
 
     const sorted = [...trades].sort((a, b) => a.date.localeCompare(b.date));
 
     sorted.forEach(t => {
       const gross = t.shares * t.price;
       if (t.type === 'SELL') {
-        // Record cash received, decrement shares, open rotation window
         currentShares -= t.shares;
         totalCash += gross - (t.fees || 0);
-        // A new SELL always opens (or replaces) the pending window.
-        // Consecutive SELLs: only the most recent opens the BUY window.
         pendingSell = { shares: t.shares, price: t.price, proceeds: gross - (t.fees || 0) };
       } else {
-        // BUY leg
         currentShares += t.shares;
         totalCash -= gross + (t.fees || 0);
         if (pendingSell !== null) {
-          // This BUY closes the open SELL — it is a paired rotation trade
           const buyLegCost = gross + (t.fees || 0);
           const netShareGain = t.shares - pendingSell.shares;
           rotationShares += netShareGain;
@@ -674,14 +680,9 @@ function MSTRCycleTool() {
           completedRotations += 1;
           pendingSell = null;
         }
-        // If pendingSell === null, this is a direct accumulation BUY —
-        // it correctly increments currentShares but does not touch
-        // rotationCostBasis or rotationShares.
       }
     });
 
-    // costPerExtraShare is only meaningful when at least one pair completed
-    // AND net rotation shares are positive (i.e. we actually gained shares).
     const costPerExtraShare = (completedRotations > 0 && rotationShares > 0)
       ? rotationCostBasis / rotationShares
       : null;
@@ -706,14 +707,14 @@ function MSTRCycleTool() {
     return { positionUSD, positionGBP, totalGBP, cashPct, positionPct: 100 - cashPct };
   }, [journalStats.currentShares, mstrPrice, gbpUsd, cashBuffer]);
 
-  // ============ PROMPT ============
-  const claudePrompt = `You are providing market data for a live trading decision tool. Accuracy and freshness are critical — stale or guessed data causes bad trades. Follow all four phases below.
+  // ============ PROMPT (v2 — Phase 3 mandatory math audit) ============
+  const claudePrompt = `You are providing market data for a live trading decision tool. Accuracy and freshness are critical — stale, hallucinated, or guessed data causes catastrophic trading losses. Follow all four phases below exactly.
 
 PHASE 1 — STATE THE CURRENT TIME
-Write one line: "Current time: YYYY-MM-DD HH:MM UTC" before searching anything.
+Write one line: "Current time: YYYY-MM-DD HH:MM UTC" before executing any searches.
 
 PHASE 2 — SEARCH WITH FRESHNESS DISCIPLINE
-Search for each item. Prefer live/real-time sources over articles.
+Search for each item. Prioritize real-time ticker feeds, options chains, and active balance sheet metrics over articles/commentary.
 
 Sources to use:
 - MSTR price + technicals: finance.yahoo.com, barchart.com, stockanalysis.com (live quote)
@@ -729,19 +730,27 @@ Sources to use:
 - Strategy ATM status: most recent S-3 or prospectus supplement on SEC EDGAR for MSTR
 - Strategy 8-K BTC holdings: latest 8-K on SEC EDGAR
 - Strategy 10-Q (debt, preferred, cash): latest 10-Q on SEC EDGAR
+- mNAV secondary reference (read-only audit only — do NOT extract mNAV from here): bitcoinquant.co/company/MSTR or VanEck tracker
 
 Freshness rules:
-- Do NOT use articles from days or weeks ago for live prices.
+- Do NOT use articles from days or weeks ago for live stock or spot asset prices.
 - If your top result is old, search again with "today", "current", or the actual date.
 - Do NOT extrapolate from training data memory. If you cannot cite a source under 7 days old, mark the field as estimated.
 - Weekend/holiday closes: note explicitly in STALE_FIELDS.
 
-PHASE 3 — COMPUTE mNAV
-EV = (MSTR_PRICE x DILUTED_SHARES_MILLIONS x 1000000) + (TOTAL_DEBT x 1000000) + (PREFERRED_NOTIONAL x 1000000) - (CASH_POSITION x 1000000)
-BTC_NAV = BTC_HOLDINGS x BTC_PRICE
-mNAV = EV / BTC_NAV
+PHASE 3 — MANDATORY BALANCE SHEET MATH AUDIT
+CRITICAL INTERNET SEARCH TRAP: Do NOT extract the mNAV ratio from summary tracking sheets, external trackers, tweets, or legacy articles. Those are frequently cached and mismatched against live stock price moves. You MUST calculate it from scratch using your freshly discovered live values:
 
-Cross-check against a live tracker (bitcoinquant.co/company/MSTR or VanEck). If computed vs tracker differs by more than 0.1x, recheck debt and preferred inputs.
+Step 3.1: Market Cap = MSTR_PRICE x (DILUTED_SHARES x 1,000,000)
+Step 3.2: Enterprise Value (EV) = Market Cap + (TOTAL_DEBT x 1,000,000) + (PREFERRED_NOTIONAL x 1,000,000) - (CASH_POSITION x 1,000,000)
+  Note: TOTAL_DEBT, PREFERRED_NOTIONAL, and CASH_POSITION are in millions USD — multiply each by 1,000,000 for the EV calculation.
+Step 3.3: Bitcoin NAV (BTC_NAV) = BTC_HOLDINGS x BTC_PRICE
+  Note: BTC_NAV is in raw USD — no division needed here.
+Step 3.4: Final mNAV = EV / BTC_NAV
+
+You must map the exact result of Step 3.4 directly to the MNAV: field in the data block below. Do not let external trackers override your calculation.
+
+Step 3.5 (optional audit): Check your computed mNAV against bitcoinquant.co/company/MSTR or the VanEck tracker. If your figure diverges by more than 0.15x, recheck TOTAL_DEBT and PREFERRED_NOTIONAL inputs — a mismatch here almost always indicates a stale or misread balance sheet line. Do NOT override your Step 3.4 result with the tracker value; use the tracker only to catch input errors.
 
 PHASE 4 — RETURN DATA BLOCK
 Return the block below exactly as shown. One key per line. No extra commentary inside the block. Use plain numbers only — no dollar signs, commas, or percent symbols.
@@ -764,11 +773,11 @@ MVRV: [number, one decimal, e.g. 1.4]
 STH_REALIZED_PRICE: [number, BTC short-term holder cost basis in USD]
 ETF_FLOWS_5D: [signed integer millions USD, e.g. -847 for 847M outflow]
 BTC_HOLDINGS: [integer]
-DILUTED_SHARES: [number in millions, e.g. 334]
+DILUTED_SHARES: [number in millions, e.g. 280.0 not 280000000]
 TOTAL_DEBT: [number in millions USD]
 PREFERRED_NOTIONAL: [number in millions USD, total of STRC+STRF+STRK+STRD]
 CASH_POSITION: [number in millions USD]
-MNAV: [number, two decimals]
+MNAV: [number, two decimals, MUST EXACTLY MATCH YOUR STEP 3.4 CALCULATION — not any tracker value]
 DXY: [number, one decimal]
 BTC_DOMINANCE: [number, one decimal, e.g. 58.4]
 MSTR_SHORT_INT: [number, one decimal, percent of float, e.g. 14.2]
@@ -787,9 +796,9 @@ ATM_ACTIVE: ON or OFF
 
 FIELD RULES:
 - All numbers: digits and decimal point only. No symbols.
-- DILUTED_SHARES: in millions (e.g. 334 not 334000000).
+- DILUTED_SHARES: in millions (e.g. 280.0 not 280000000).
 - TOTAL_DEBT, PREFERRED_NOTIONAL, CASH_POSITION: in millions USD.
-- BELOW_200MA: ON if MSTR closing price is below 200-day SMA on most recent weekly close.
+- BELOW_200MA: ON if MSTR closing price is below 200-day SMA on most recent close.
 - WEEKLY_LL: ON if MSTR has printed weekly lower-low after lower-high (confirmed downtrend).
 - SHORTING and EXHAUSTION are mutually exclusive — at most one ON.
 - SHORTING: ON only if BTC perp funding is persistently and aggressively negative across Binance, Bybit, OKX.
@@ -806,15 +815,20 @@ FIELD RULES:
 - MSTR_IV_RANK: 0 = cheapest options in a year, 100 = most expensive. Use barchart.com MSTR options page. IV > 75 signals peak retail speculation / gamma overextension (bear signal in scoring engine).
 
 CONFIDENCE CRITERIA:
-HIGH: All fields from live sources under 24h old. No estimates. mNAV matches tracker within 0.1x.
-MEDIUM: 1-2 fields estimated or over 24h old. Or mNAV diverges 0.1-0.2x from tracker.
-LOW: 3+ fields estimated. Or any major field (MSTR_PRICE, BTC_PRICE, BTC_HOLDINGS, MNAV, NUPL, MVRV) is over 48h old or uncertain. Or mNAV diverges over 0.2x from tracker.
+HIGH: All fields from live sources under 24h old. No estimates. MNAV field exactly matches your Step 3.4 recomputed figure.
+MEDIUM: 1-2 fields estimated or over 24h old.
+LOW: 3+ fields estimated. Or any major field (MSTR_PRICE, BTC_PRICE, BTC_HOLDINGS, MNAV, NUPL, MVRV) is over 48h old or uncertain. Or your computed mNAV diverges significantly from the optional Step 3.5 tracker cross-check and you cannot explain why.
 
 POST-BLOCK REPORT (required, outside the data block):
 
 A) DATA TIMESTAMPS — one line per field: source name and age.
 B) ESTIMATES VS VERIFIED — explicit list.
-C) mNAV AUDIT — full EV breakdown: market cap + debt + preferred - cash = EV, then EV / BTC NAV = mNAV. State tracker reading and difference.
+C) mNAV AUDIT — show the full step-by-step math:
+   - Market Cap = MSTR_PRICE x (DILUTED_SHARES x 1,000,000) = $X
+   - EV = Market Cap + (TOTAL_DEBT x 1M) + (PREFERRED_NOTIONAL x 1M) - (CASH_POSITION x 1M) = $X
+   - BTC_NAV = BTC_HOLDINGS x BTC_PRICE = $X
+   - Final mNAV = EV / BTC_NAV = X.XX
+   - Tracker cross-check (Step 3.5): state what bitcoinquant.co or VanEck showed (if checked) and the difference vs your computed figure. Note if you could not access the tracker.
 D) CONFIDENCE JUSTIFICATION — one sentence.
 E) OTHER NOTES — unusual readings, conflicting sources, market closures, recent corporate actions.`;
 
@@ -1162,7 +1176,7 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
 
         {/* HEADER */}
         <div style={{ marginBottom: '24px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '20px' }}>
-          <div style={{ fontSize: '10px', letterSpacing: '0.3em', color: colors.textMute, textTransform: 'uppercase', marginBottom: '8px' }}>Cycle Decision Framework · v14.4</div>
+          <div style={{ fontSize: '10px', letterSpacing: '0.3em', color: colors.textMute, textTransform: 'uppercase', marginBottom: '8px' }}>Cycle Decision Framework · v14.4 · prompt v2</div>
           <h1 style={{ fontSize: '26px', fontWeight: 400, color: colors.highlight, margin: 0, fontStyle: 'italic' }}>MSTR Rotation</h1>
           <h2 style={{ fontSize: '14px', fontWeight: 400, color: colors.textDim, margin: '4px 0 12px 0', letterSpacing: '0.05em' }}>Rotate · Hoard · Deploy</h2>
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '12px', marginTop: '12px', alignItems: 'center' }}>
@@ -1846,7 +1860,7 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                   </div>
                 </div>
 
-                {/* BF1: Accrual efficiency — only renders when costPerExtraShare is valid */}
+                {/* BF1: Accrual efficiency */}
                 {journalStats.completedRotations > 0 && (
                   <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${colors.border}` }}>
                     <div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Accrual efficiency</div>
@@ -1868,7 +1882,6 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                         </div>
                       </div>
                     ) : (
-                      // Edge case: rotations completed but net shares = 0 or negative
                       <div style={{ fontSize: '11px', color: colors.textMute, fontStyle: 'italic', padding: '8px 10px', background: colors.bg, border: `1px dashed ${colors.border}` }}>
                         {journalStats.rotationShares <= 0
                           ? 'Net rotation shares are zero or negative — accrual efficiency not applicable.'
@@ -1881,9 +1894,8 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                   </div>
                 )}
 
-                {/* Awaiting state — no rotations yet */}
                 {journalStats.completedRotations === 0 && trades.length > 0 && (
-                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${colors.border}`, fontSize: '11px', color: colors.textMute, fontStyle: 'italic', padding: '10px 12px', background: colors.bg, border: `1px dashed ${colors.border}`, marginTop: '16px' }}>
+                  <div style={{ fontSize: '11px', color: colors.textMute, fontStyle: 'italic', padding: '10px 12px', background: colors.bg, border: `1px dashed ${colors.border}`, marginTop: '16px' }}>
                     Awaiting completed cycle… Log a paired SELL → BUY rotation to see accrual efficiency metrics.
                   </div>
                 )}
@@ -1916,7 +1928,7 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                     <span style={{ color: colors.textDim }}>{t.date}</span>
                     <span style={{ color: colors.text }}>{t.shares} sh</span>
                     <span style={{ color: colors.gold }}>${t.price}</span>
-                    {/* BF5: deleteTrade is now defined and functional */}
+                    {/* BF5: deleteTrade now defined */}
                     <button onClick={() => deleteTrade(t.id)} style={{ background: 'transparent', border: 'none', color: colors.textFaint, cursor: 'pointer', fontSize: '14px' }}>×</button>
                   </div>
                 ))}
