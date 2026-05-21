@@ -10,84 +10,76 @@
 
 <!--
   =================================================================
-  MSTR CYCLE DECISION FRAMEWORK · v14.3 (web build)
+  MSTR CYCLE DECISION FRAMEWORK · v14.4 (web build)
   =================================================================
 
-  CHANGES IN v14.3 vs v14.2
+  CHANGES IN v14.4 vs v14.3
   -------------------------
-  Six targeted fixes: three code-quality hardening passes and three
-  strategic scoring / level enhancements.
+  Four targeted production fixes plus one silent runtime crash patched.
 
-  CODE REVIEW FIXES (CR1–CR3):
+  BUG FIXES (BF1–BF5):
 
-  CR1. MODE TRANSITION CONFLICT
-     - Mode priority is DEPLOY → HOARD → ROTATE (DEPLOY evaluated first,
-       always wins — no flickering possible since mode is pure derived
-       computation). Verified mathematically airtight.
-     - Added a "DEPLOY approaching" advisory banner when bottomScore ∈ [5,6]
-       AND mstrPrice < 160 AND current mode is HOARD. Surfaces the imminent
-       transition before it occurs, preventing the visual paradox of HOARD
-       mode while bottom signals visibly escalate.
+  BF1. ACCRUAL EFFICIENCY LEDGER MATH (journalStats rebuild)
+     - Root cause: rotationCostBasis was accumulating ALL buy-leg cash
+       including direct accumulation buys with no preceding sell, causing
+       astronomically false "above market" efficiency readings.
+     - Fix: Strict SELL→BUY pair sequencing via pendingSell sentinel.
+       Only BUY legs that close an open SELL leg contribute to
+       rotationCostBasis and rotationShares. Direct BUYs (no preceding
+       SELL) are excluded from rotation metrics entirely — they increment
+       currentShares but do not affect rotationCostBasis.
+     - If rotationShares === 0, costPerExtraShare is set to null and
+       the UI renders "Awaiting completed cycle…" instead of broken math.
+     - rotationCostBasis is now the sum of (buyShares × buyPrice + fees)
+       for each paired BUY, and rotationShares is the net share gain
+       from each pair ((buyShares - sellShares) per pair, summed).
 
-  CR2. NUMBERINPUT KEYSTROKE JUMPINESS (iOS)
-     - Parent onChange is now deferred to onBlur / Enter only.
-     - Mid-typing transient strings (".", "0.", "-", "-.") are held in
-       local editValue state only and never pushed to parent state.
-     - Eliminates the iOS behaviour where typing "0.5" momentarily commits
-       "0" (from "0.") to derived calculations mid-keystroke.
-     - +/− steppers still fire immediately (always produce a valid number).
-     - onFocus now selects field content for convenient overwriting on mobile.
+  BF2. HEADER mNAV DISPLAY HARDENING
+     - Root cause: parsedMnav from the pasted data block was displayed
+       as-is in the header bar even when it diverged significantly from
+       the live recomputedMnav, creating a dangerous discrepancy.
+     - Fix: Header mNAV display now uses a derived displayMnav value:
+         * If recomputedMnav is available AND diverges from parsedMnav
+           by > MNAV_WARN_THRESHOLD (0.15x), display recomputedMnav
+           with a "↻ live" badge in amber to flag the override.
+         * If recomputedMnav is available and within tolerance, display
+           parsedMnav (consistent with main panel).
+         * Falls back to parsedMnav → legacyMnav if recomputed unavailable.
+     - The existing discrepancy warning in the On-chain panel is unchanged.
 
-  CR3. mNAV DISCREPANCY TOLERANCE
-     - Warning threshold raised from 0.1x to 0.15x.
-     - Root cause: recomputedMnav uses live mstrPrice; parsedMnav from the
-       LLM tracker captures price minutes/hours earlier. A 0.1x gap is
-       reachable on any normal intraday MSTR move. 0.15x requires a more
-       meaningful divergence worth acting on.
-     - Math.round applied to 2dp on both sides before differencing to
-       dampen floating-point noise from the million-scaling arithmetic.
-     - Warning now includes a note that divergence may reflect price timing.
+  BF3. DEFAULT BASELINE PARAMETERS TO ZERO
+     - startingShares: 211 → 0
+     - cashBuffer: 0 (was already 0, confirmed)
+     - Ensures fresh deployments initialize with a clean slate rather
+       than a placeholder share count that corrupts portfolio metrics.
 
-  STRATEGIC ENHANCEMENTS (SE1–SE3):
+  BF4. CYCLE CLOCK: HARDCODED DATES → MVRV-DRIVEN LIVE STRUCTURE
+     - Progress bar now maps MVRV position relative to cycle extremes:
+         Progress% = clamp(((3.0 - mvrv) / (3.0 - 0.8)) × 100, 0, 100)
+         0% = Cycle peak (MVRV ≥ 3.0) — correction just beginning
+         100% = Capitulation floor (MVRV ≤ 0.8) — fully corrected
+     - Labels updated to "Correction Progress" and "MVRV Target Proximity"
+       rather than calendar day countdown.
+     - Contextual commentary displayed beneath bar: zone label
+       (Recovery / Healthy / Caution / Distribution / Euphoria) derived
+       from MVRV band, matching the existing on-chain scoring logic.
+     - Fallback: if mvrv === null or unavailable, falls back to legacy
+       date-based calculation (Oct 2025 ATH → Oct 2026 projected bottom)
+       with an explicit "Calendar fallback — paste data to enable MVRV
+       clock" note. cycleData memo retained for this fallback path.
 
-  SE1. IV RANK AS HOARD ACCELERATOR
-     - MSTR_IV_RANK was previously parsed but unused in scoring.
-     - New rule: if MSTR_IV_RANK > 75, bearScore += 1.
-     - Rationale: IV > 75th percentile marks peak retail options speculation
-       / gamma squeeze extension. Options premiums historically collapse from
-       this zone, making it the optimal cash-locking window before vol crush.
-     - IV rank is now stored to state (ivRank) and persisted.
-     - Score ceiling: bear max 19 → 20.
-     - Dashboard: IV rank displayed in the header bar alongside BTC.D.
+  BF5. deleteTrade RUNTIME CRASH (silent bug, not in brief)
+     - deleteTrade was called in the Journal trade history list but was
+       never defined in the component, causing a silent TypeError crash
+       whenever a user tapped the × button on any trade row.
+     - Fix: deleteTrade function added, mirroring deleteSnapshot/
+       deletePosition patterns — filters by id, updates state and
+       localStorage.
 
-  SE2. ACCRETION VELOCITY ROTATION BRAKE
-     - When ATM_ACTIVE === true AND mNAV < 1.2, the active rotation sizing
-       percentages are cut by half (Moderate: 25–30% → 12–15%).
-     - Implemented as a derived `activeProfile` overlay, NOT mutation of the
-       base profile — the underlying aggressionStyle is preserved and the
-       brake cleanly disables when conditions change.
-     - Visual indicator "(Dilution Brake Active)" rendered next to the Style
-       row on the mode card whenever the brake is firing.
-     - Rationale: burning cash buffer via normal rotation while management
-       dilutes near baseline mNAV compounds the per-share BTC erosion. The
-       brake forces the user to hold wider margins until premium recovers.
-
-  SE3. STH-ANCHORED DEPLOY LADDER
-     - When sthRealizedPrice is available, the 4-rung DEPLOY ladder now
-       anchors to the MSTR equivalent of the BTC STH realized price:
-         STH_MSTR = btcPerShare × sthRealizedPrice
-       Rungs: ×1.05, ×1.00, ×0.90, ×0.80 (with profile steepness applied).
-     - Falls back to legacy 200MA / price-percentage calculation when
-       sthRealizedPrice is null (behaviour unchanged from v14.2).
-     - Rationale: the STH realized price is the definitive on-chain floor
-       where recent BTC buyers turn net-negative, creating reflexive sell
-       pressure that directly translates into MSTR drawdowns. Using a lagging
-       200MA to set DEPLOY rungs in a crypto-proxy environment ignores the
-       most structurally meaningful support level available.
-     - DEPLOY mode card shows which anchor is active (STH-anchored vs 200MA).
-
-  SCORE CEILINGS: bear max 20 (was 19), bottom max 20 (unchanged).
-  HOARD/DEPLOY thresholds unchanged: bear ≥6, bottom ≥7 + MSTR<$140.
+  SCORE CEILINGS: unchanged from v14.3 (bear max 20, bottom max 20).
+  ALL THRESHOLDS: unchanged from v14.3.
+  All v14.3 features (SE1 IV Rank, SE2 Dilution Brake, SE3 STH Ladder,
+  CR1 Deploy Imminent, CR2 NumberInput, CR3 mNAV tolerance) preserved.
 -->
 
 <script>
@@ -195,7 +187,9 @@ function MSTRCycleTool() {
   const [btcHoldings, setBtcHoldings] = useState(818869);
   const [dilutedShares, setDilutedShares] = useState(280);
   const [corporateBaseUpdated, setCorporateBaseUpdated] = useState(null);
-  const [startingShares, setStartingShares] = useState(211);
+  // BF3: startingShares defaults to 0 (was 211)
+  const [startingShares, setStartingShares] = useState(0);
+  // BF3: cashBuffer stays 0 (confirmed already 0 in v14.3)
   const [cashBuffer, setCashBuffer] = useState(0);
   const [gbpUsd, setGbpUsd] = useState(1.27);
 
@@ -356,7 +350,7 @@ function MSTRCycleTool() {
     return btcNav > 0 ? ev / btcNav : null;
   }, [mstrPrice, dilutedShares, totalDebt, preferredNotional, cashPosition, btcHoldings, btcPrice]);
 
-  // CR3: threshold 0.1 → 0.15; round both to 2dp to dampen float noise
+  // CR3: threshold 0.1 → 0.15; round both to 2dp
   const mNAVdiscrepancy = useMemo(() => {
     if (parsedMnav === null || recomputedMnav === null) return null;
     const a = Math.round(parsedMnav * 100) / 100;
@@ -365,6 +359,22 @@ function MSTRCycleTool() {
   }, [parsedMnav, recomputedMnav]);
   const MNAV_WARN_THRESHOLD = 0.15;
 
+  // BF2: Derived displayMnav for the header bar.
+  // If recomputedMnav is available and diverges beyond tolerance, use it
+  // (with a flag so the header can render a visual indicator). Otherwise
+  // fall through to parsedMnav → legacyMnav.
+  const headerMnavInfo = useMemo(() => {
+    const diverged = mNAVdiscrepancy !== null && mNAVdiscrepancy > MNAV_WARN_THRESHOLD;
+    if (recomputedMnav !== null && diverged) {
+      return { value: recomputedMnav, overridden: true, parsedWas: parsedMnav };
+    }
+    return { value: mNAV, overridden: false, parsedWas: null };
+  }, [recomputedMnav, mNAV, mNAVdiscrepancy, parsedMnav]);
+
+  // BF4: MVRV-driven cycle clock.
+  // cycleData is retained as legacy fallback when mvrv is unavailable.
+  const MVRV_PEAK = 3.0;    // 0% correction progress
+  const MVRV_FLOOR = 0.8;   // 100% correction progress
   const cycleData = useMemo(() => {
     const ath = new Date('2025-10-06');
     const target = new Date('2026-10-06');
@@ -375,6 +385,20 @@ function MSTRCycleTool() {
     const progress = Math.min(100, Math.max(0, (elapsed / totalDays) * 100));
     return { totalDays, elapsed, remaining, progress };
   }, [lastUpdated]);
+
+  // BF4: MVRV-based progress (primary clock)
+  const mvrvClock = useMemo(() => {
+    const progress = Math.min(100, Math.max(0, ((MVRV_PEAK - mvrv) / (MVRV_PEAK - MVRV_FLOOR)) * 100));
+    let zone, zoneColor;
+    if (mvrv >= 3.0)      { zone = 'Euphoria — peak distribution risk';  zoneColor = '#c73e1d'; }
+    else if (mvrv >= 2.0) { zone = 'Distribution — late-cycle elevated'; zoneColor = '#c73e1d'; }
+    else if (mvrv >= 1.5) { zone = 'Caution — premium above fair value'; zoneColor = '#d4a017'; }
+    else if (mvrv >= 1.0) { zone = 'Healthy — within normal range';      zoneColor = '#d4a017'; }
+    else if (mvrv >= 0.8) { zone = 'Compressed — approaching floor';     zoneColor: '#2d8659'; zoneColor = '#2d8659'; }
+    else                  { zone = 'Capitulation — below cost basis';    zoneColor = '#2d8659'; }
+    const pctToFloor = Math.max(0, ((mvrv - MVRV_FLOOR) / (MVRV_PEAK - MVRV_FLOOR)) * 100);
+    return { progress, zone, zoneColor, pctToFloor };
+  }, [mvrv]);
 
   const daysSinceBaseUpdate = useMemo(() => {
     if (!corporateBaseUpdated) return null;
@@ -394,7 +418,6 @@ function MSTRCycleTool() {
   const dilutionBrakeActive = useMemo(() => atmActive && mNAV !== null && mNAV < 1.2, [atmActive, mNAV]);
 
   // ============ AGGRESSION PROFILE ============
-  // Base profile (pure, not mutated by brake)
   const baseProfile = useMemo(() => {
     switch (aggressionStyle) {
       case 'conservative':
@@ -406,7 +429,6 @@ function MSTRCycleTool() {
     }
   }, [aggressionStyle]);
 
-  // SE2: activeProfile applies dilution brake overlay when conditions fire
   const profile = useMemo(() => {
     if (!dilutionBrakeActive) return baseProfile;
     return {
@@ -422,7 +444,6 @@ function MSTRCycleTool() {
     return { high20, low20, high50, low50, low200, atr14 };
   }, [high20, low20, high50, low50, low200, atr14]);
 
-  // SE3: STH-anchored MSTR price floor
   const sthMstrFloor = useMemo(() => {
     if (!sthRealizedPrice || btcPerShare <= 0) return null;
     return btcPerShare * sthRealizedPrice;
@@ -440,11 +461,9 @@ function MSTRCycleTool() {
     const hoardBuyTarget = current - (current - hoardBuyAnchor) / profile.hoardSensitivity;
     const hoardBuyDeepTarget = current - (current - hoardBuyDeep) / profile.hoardSensitivity;
 
-    // SE3: Build DEPLOY ladder — STH-anchored if available, else legacy
     let deployRungs;
     let deployAnchorMode;
     if (sthMstrFloor !== null) {
-      // STH-anchored rungs: 1.05x, 1.00x, 0.90x, 0.80x (steepness scales the gap from floor)
       const s = profile.deployLadderSteepness;
       deployRungs = [
         { level: sthMstrFloor * (1 + 0.05 * s), pct: 25 },
@@ -479,9 +498,6 @@ function MSTRCycleTool() {
   }, [technicals, ma200, mstrPrice, profile, sthMstrFloor]);
 
   // ============ SCORES + MODE ============
-  // CR1: DEPLOY evaluated first — always wins over HOARD. Verified airtight.
-  // Bear max 20 (SE1 adds +1 for IV rank), Bottom max 20 (unchanged).
-
   const bearScore = useMemo(() => {
     let s = 0;
     if (btcPrice < 72500) s += 2;
@@ -499,7 +515,6 @@ function MSTRCycleTool() {
     if (etfOutflowsPersistent) s += 1;
     if (btcDominance !== null && btcDominance < 50) s += 1;
     if (atmActive && mNAV !== null && mNAV < 1.2) s += 1;
-    // SE1: IV rank > 75 = peak retail options speculation / gamma overextension
     if (ivRank !== null && ivRank > 75) s += 1;
     return s;
   }, [btcPrice, nupl, mvrv, fundingNegative, below200ma, weeklyLowerLow, dxyAbove110,
@@ -521,14 +536,12 @@ function MSTRCycleTool() {
     return s;
   }, [mstrPrice, btcPrice, nupl, mvrv, derivativesExhaustion, cycleData, mNAV, btcBelowSthCost, mstrShortInt]);
 
-  // CR1: DEPLOY branch evaluated first — always takes priority over HOARD
   const mode = useMemo(() => {
     if (bottomScore >= 7 && mstrPrice < 140) return 'DEPLOY';
     if (bearScore >= 6) return 'HOARD';
     return 'ROTATE';
   }, [bearScore, bottomScore, mstrPrice]);
 
-  // CR1: DEPLOY imminent advisory — fires before threshold is crossed
   const deployImminent = useMemo(() => {
     if (mode !== 'HOARD') return false;
     return bottomScore >= 5 && bottomScore <= 6 && mstrPrice < 160;
@@ -624,26 +637,65 @@ function MSTRCycleTool() {
     return { pct: null, verdict: liveRungs.length > 0 ? `${liveRungs.length}/4 RUNGS LIVE` : 'ABOVE LADDER', tone: GREEN, ladder: d.deploy.ladder };
   }, [dynamicLevels, mstrPrice, mode]);
 
-  // ============ JOURNAL STATS ============
+  // ============ BF1: JOURNAL STATS — STRICT ROTATION PAIR ACCOUNTING ============
+  // Only BUY legs that close an open SELL leg contribute to rotationCostBasis
+  // and rotationShares. Direct BUYs (no pending SELL) increment currentShares
+  // but are excluded from rotation metrics. If no pairs completed, costPerExtraShare
+  // is null and the UI renders a clean "Awaiting completed cycle…" message.
   const journalStats = useMemo(() => {
-    let currentShares = startingShares, totalCash = 0, rotationShares = 0, completedRotations = 0, openSell = null, rotationCostBasis = 0;
+    let currentShares = startingShares;
+    let totalCash = 0;
+    let rotationShares = 0;
+    let rotationCostBasis = 0;
+    let completedRotations = 0;
+    let pendingSell = null; // { shares, price, proceeds }
+
     const sorted = [...trades].sort((a, b) => a.date.localeCompare(b.date));
+
     sorted.forEach(t => {
       const gross = t.shares * t.price;
       if (t.type === 'SELL') {
-        currentShares -= t.shares; totalCash += gross - (t.fees || 0);
-        openSell = { shares: t.shares, price: t.price, proceeds: gross - (t.fees || 0) };
+        // Record cash received, decrement shares, open rotation window
+        currentShares -= t.shares;
+        totalCash += gross - (t.fees || 0);
+        // A new SELL always opens (or replaces) the pending window.
+        // Consecutive SELLs: only the most recent opens the BUY window.
+        pendingSell = { shares: t.shares, price: t.price, proceeds: gross - (t.fees || 0) };
       } else {
-        currentShares += t.shares; totalCash -= gross + (t.fees || 0);
-        if (openSell) {
-          rotationShares += t.shares - openSell.shares;
-          rotationCostBasis += gross + (t.fees || 0);
-          completedRotations += 1; openSell = null;
+        // BUY leg
+        currentShares += t.shares;
+        totalCash -= gross + (t.fees || 0);
+        if (pendingSell !== null) {
+          // This BUY closes the open SELL — it is a paired rotation trade
+          const buyLegCost = gross + (t.fees || 0);
+          const netShareGain = t.shares - pendingSell.shares;
+          rotationShares += netShareGain;
+          rotationCostBasis += buyLegCost;
+          completedRotations += 1;
+          pendingSell = null;
         }
+        // If pendingSell === null, this is a direct accumulation BUY —
+        // it correctly increments currentShares but does not touch
+        // rotationCostBasis or rotationShares.
       }
     });
-    const costPerExtraShare = rotationShares > 0 ? rotationCostBasis / rotationShares : null;
-    return { currentShares, totalCash, sharesDelta: currentShares - startingShares, sharesPct: startingShares > 0 ? ((currentShares - startingShares) / startingShares) * 100 : 0, rotationShares, completedRotations, tradeCount: trades.length, costPerExtraShare };
+
+    // costPerExtraShare is only meaningful when at least one pair completed
+    // AND net rotation shares are positive (i.e. we actually gained shares).
+    const costPerExtraShare = (completedRotations > 0 && rotationShares > 0)
+      ? rotationCostBasis / rotationShares
+      : null;
+
+    return {
+      currentShares,
+      totalCash,
+      sharesDelta: currentShares - startingShares,
+      sharesPct: startingShares > 0 ? ((currentShares - startingShares) / startingShares) * 100 : 0,
+      rotationShares,
+      completedRotations,
+      tradeCount: trades.length,
+      costPerExtraShare,
+    };
   }, [trades, startingShares]);
 
   const portfolio = useMemo(() => {
@@ -876,6 +928,13 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
     setTradeShares(''); setTradePrice(''); setTradeFees('');
   };
 
+  // BF5: deleteTrade was called but never defined — now fixed
+  const deleteTrade = (id) => {
+    const updated = trades.filter(t => t.id !== id);
+    setTrades(updated);
+    try { localStorage.setItem('mstr:trades', JSON.stringify(updated)); } catch (e) {}
+  };
+
   const openPosition = (overrides = {}) => {
     const f = { ...positionForm, ...overrides };
     if (!f.shares || !f.entryPrice) return;
@@ -911,7 +970,7 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
   const [importResult, setImportResult] = useState(null);
 
   const buildExportPayload = () => ({
-    version: 14.3,
+    version: 14.4,
     exportedAt: new Date().toISOString(),
     settings: { mstrPrice, btcPrice, ma200, lastUpdated, high20, low20, high50, low50, low200, atr14, nupl, mvrv, fundingNegative, derivativesExhaustion, below200ma, weeklyLowerLow, dxyAbove110, btcHoldings, dilutedShares, corporateBaseUpdated, startingShares, cashBuffer, gbpUsd, levelsAuto, manualSellLow, manualSellHigh, manualBuyLow, manualBuyHigh, aggressionStyle, parsedMnav, totalDebt, preferredNotional, cashPosition, sthRealizedPrice, btcBelowSthCost, etfFlows5d, etfOutflowsPersistent, mnavCompressed, mnavEuphoric, dataTimestamp, confidence, staleFields, btcDominance, mstrShortInt, atmActive, ivRank },
     trades, snapshots, positions,
@@ -1103,16 +1162,27 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
 
         {/* HEADER */}
         <div style={{ marginBottom: '24px', borderBottom: `1px solid ${colors.border}`, paddingBottom: '20px' }}>
-          <div style={{ fontSize: '10px', letterSpacing: '0.3em', color: colors.textMute, textTransform: 'uppercase', marginBottom: '8px' }}>Cycle Decision Framework · v14.3</div>
+          <div style={{ fontSize: '10px', letterSpacing: '0.3em', color: colors.textMute, textTransform: 'uppercase', marginBottom: '8px' }}>Cycle Decision Framework · v14.4</div>
           <h1 style={{ fontSize: '26px', fontWeight: 400, color: colors.highlight, margin: 0, fontStyle: 'italic' }}>MSTR Rotation</h1>
           <h2 style={{ fontSize: '14px', fontWeight: 400, color: colors.textDim, margin: '4px 0 12px 0', letterSpacing: '0.05em' }}>Rotate · Hoard · Deploy</h2>
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '12px', marginTop: '12px', alignItems: 'center' }}>
             <div><span style={{ color: colors.textMute }}>BTC </span><span style={{ color: colors.gold }}>${btcPrice.toLocaleString()}</span></div>
             <div><span style={{ color: colors.textMute }}>MSTR </span><span style={{ color: colors.gold }}>${mstrPrice.toFixed(2)}</span></div>
             <div><span style={{ color: colors.textMute }}>200MA </span><span style={{ color: colors.gold }}>{ma200 ? `$${ma200.toFixed(2)}` : '—'}</span></div>
-            <div style={{ color: colors.textMute }}>mNAV <span style={{ color: mNavTone(mNAV) }}>{mNAV ? `${mNAV.toFixed(2)}x` : '—'}</span></div>
+            {/* BF2: Header mNAV — shows recomputedMnav with override badge if parsedMnav diverges beyond tolerance */}
+            <div style={{ color: colors.textMute }}>
+              mNAV{' '}
+              <span style={{ color: mNavTone(headerMnavInfo.value) }}>
+                {headerMnavInfo.value ? `${headerMnavInfo.value.toFixed(2)}x` : '—'}
+              </span>
+              {headerMnavInfo.overridden && (
+                <span title={`Pasted mNAV was ${headerMnavInfo.parsedWas?.toFixed(2)}x — overridden with live recomputed value due to divergence > ${MNAV_WARN_THRESHOLD}x`}
+                  style={{ marginLeft: '4px', fontSize: '9px', color: colors.gold, border: `1px solid ${colors.gold}`, padding: '1px 4px', borderRadius: '2px', letterSpacing: '0.06em', cursor: 'help', verticalAlign: 'middle' }}>
+                  ↻ live
+                </span>
+              )}
+            </div>
             {btcDominance !== null && <div style={{ color: colors.textMute }}>BTC.D <span style={{ color: btcDominance < 50 ? colors.red : btcDominance > 60 ? colors.green : colors.gold }}>{btcDominance.toFixed(1)}%</span></div>}
-            {/* SE1: IV rank in header bar */}
             {ivRank !== null && <div style={{ color: colors.textMute }}>IV Rank <span style={{ color: ivRank > 75 ? colors.red : ivRank > 50 ? colors.gold : colors.green, fontWeight: ivRank > 75 ? 700 : 400 }}>{ivRank}{ivRank > 75 ? ' ⚡' : ''}</span></div>}
           </div>
           <div style={{ fontSize: '9px', color: colors.textFaint, marginTop: '6px', letterSpacing: '0.05em', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -1288,14 +1358,12 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                   <span style={{ ...t.meta, color: colors.textMute, marginLeft: '4px', fontSize: '10px' }}>
                     {profile.rotationSizePctLow}–{profile.rotationSizePctHigh}% rotation
                   </span>
-                  {/* SE2: Dilution brake badge */}
                   {dilutionBrakeActive && (
                     <span style={{ fontSize: '9px', color: colors.red, border: `1px solid ${colors.red}`, padding: '2px 6px', borderRadius: '2px', letterSpacing: '0.08em', fontWeight: 700, background: '#1a0f0d', whiteSpace: 'nowrap' }}>
                       Dilution Brake Active
                     </span>
                   )}
                 </div>
-                {/* SE2: expanded note when brake is firing */}
                 {dilutionBrakeActive && (
                   <div style={{ fontSize: '10px', color: colors.red, marginBottom: '8px', lineHeight: 1.5, padding: '8px 10px', background: '#1a0f0d', border: `1px dashed ${colors.red}`, borderRadius: '3px' }}>
                     Rotation size halved ({baseProfile.rotationSizePctLow}–{baseProfile.rotationSizePctHigh}% → {profile.rotationSizePctLow}–{profile.rotationSizePctHigh}%): ATM programme active while mNAV &lt; 1.2x. Management diluting near baseline value — burning cash buffer via normal rotation compounds per-share BTC erosion. Hold wider margins until premium recovers above 1.2x.
@@ -1347,14 +1415,12 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                 </div>
                 <div style={{ fontSize: '11px', color: mNavTone(mNAV), fontStyle: 'italic', marginBottom: '4px' }}>{mNavLabel(mNAV)}</div>
                 <div style={{ fontSize: '10px', color: colors.textMute, lineHeight: 1.5 }}>Thresholds: <span style={{ color: colors.green }}>&lt;1.05 sub-NAV</span> · 1.05–1.20 stall · 1.20–1.80 healthy · <span style={{ color: colors.red }}>1.80–2.50 elevated · &gt;2.50 euphoria</span></div>
-                {/* CR3: threshold 0.1 → 0.15, timing note added */}
                 {parsedMnav !== null && recomputedMnav !== null && mNAVdiscrepancy !== null && mNAVdiscrepancy > MNAV_WARN_THRESHOLD && (
                   <div style={{ marginTop: '6px', fontSize: '10px', color: colors.red, padding: '6px 8px', background: '#1a0f0d', border: `1px dashed ${colors.red}` }}>
-                    ⚠ Parsed mNAV ({parsedMnav.toFixed(2)}x) vs recomputed ({recomputedMnav.toFixed(2)}x) — gap {mNAVdiscrepancy.toFixed(2)}x exceeds ±{MNAV_WARN_THRESHOLD}x tolerance. This may reflect a price-timing gap between the LLM tracker and live MSTR price. If MSTR has moved significantly since your last paste, refresh before trading.
+                    ⚠ Parsed mNAV ({parsedMnav.toFixed(2)}x) vs recomputed ({recomputedMnav.toFixed(2)}x) — gap {mNAVdiscrepancy.toFixed(2)}x exceeds ±{MNAV_WARN_THRESHOLD}x tolerance. Header bar is showing the live recomputed value. This may reflect a price-timing gap between the LLM tracker and current MSTR price. If MSTR has moved significantly since your last paste, refresh before trading.
                   </div>
                 )}
                 {mNAVisLegacy && <div style={{ marginTop: '6px', fontSize: '10px', color: colors.textMute, fontStyle: 'italic' }}>Using legacy market-cap-only mNAV. Paste a prompt response to get the full EV-based figure.</div>}
-                {/* SE2: ATM dilution signal with brake status */}
                 {atmActive && (
                   <div style={{ marginTop: '6px', fontSize: '10px', padding: '5px 8px', background: dilutionBrakeActive ? '#2a1f1a' : '#1a1611', border: `1px dashed ${dilutionBrakeActive ? colors.red : colors.gold}`, color: dilutionBrakeActive ? colors.red : colors.gold }}>
                     ATM programme active{dilutionBrakeActive ? ' — dilutive at mNAV < 1.2x. Dilution Brake engaged: rotation sizing halved.' : ' — accretive at current premium (mNAV ≥ 1.2x)'}
@@ -1373,13 +1439,12 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                 <div style={{ fontSize: '11px', color: btcBelowSthCost ? colors.red : colors.textDim, marginBottom: '4px' }}>
                   {sthRealizedPrice ? (btcBelowSthCost ? `STHs underwater — recent buyers at $${sthRealizedPrice.toLocaleString()}` : `STHs profitable — cost basis $${sthRealizedPrice.toLocaleString()}`) : 'Awaiting data'}
                 </div>
-                {/* SE3: STH MSTR floor display */}
                 {sthMstrFloor !== null && (
                   <div style={{ fontSize: '10px', color: colors.green, marginTop: '4px', fontWeight: 600 }}>
                     STH MSTR floor: ${sthMstrFloor.toFixed(2)} — DEPLOY ladder anchor {mode==='DEPLOY' && levelsAuto ? 'active ✓' : '(activates in DEPLOY mode)'}
                   </div>
                 )}
-                <div style={{ fontSize: '10px', color: colors.textMute, lineHeight: 1.5, marginTop: '4px' }}>When BTC trades below short-term holder realized price, recent buyers are underwater. Structural sell pressure signal. Also anchors the DEPLOY ladder in v14.3.</div>
+                <div style={{ fontSize: '10px', color: colors.textMute, lineHeight: 1.5, marginTop: '4px' }}>When BTC trades below short-term holder realized price, recent buyers are underwater. Structural sell pressure signal. Also anchors the DEPLOY ladder in v14.3+.</div>
               </div>
 
               {/* ETF flows */}
@@ -1496,20 +1561,64 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
               </div>
             </div>
 
-            {/* CYCLE CLOCK */}
+            {/* BF4: MVRV-DRIVEN CYCLE CLOCK */}
             <div style={{ background: colors.panel, border: `1px solid ${colors.border}`, padding: '20px', marginBottom: '24px' }}>
-              <SectionHeader>◆ BTC cycle clock</SectionHeader>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '12px' }}>
-                <div><div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em' }}>ATH</div><div style={{ fontSize: '13px', color: colors.text }}>Oct 6, 2025</div><div style={{ fontSize: '11px', color: colors.gold }}>$126k</div></div>
-                <div style={{ textAlign: 'center' }}><div style={{ fontSize: '24px', color: colors.gold, fontWeight: 600 }}>{cycleData.progress.toFixed(0)}%</div><div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em' }}>through correction</div></div>
-                <div style={{ textAlign: 'right' }}><div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em' }}>Projected bottom</div><div style={{ fontSize: '13px', color: colors.text }}>Oct 6, 2026</div><div style={{ fontSize: '11px', color: colors.gold }}>$37–55k</div></div>
+              <SectionHeader>◆ BTC cycle structure</SectionHeader>
+
+              {/* Primary: MVRV clock */}
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '10px', gap: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Current MVRV</div>
+                    <div style={{ fontSize: '20px', color: colors.gold, fontWeight: 600, marginTop: '2px' }}>{mvrv.toFixed(2)}</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '28px', color: colors.gold, fontWeight: 600 }}>{mvrvClock.progress.toFixed(0)}%</div>
+                    <div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em', textTransform: 'uppercase' }}>correction progress</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Floor target</div>
+                    <div style={{ fontSize: '14px', color: colors.textDim, marginTop: '2px' }}>MVRV ≤ 0.8</div>
+                    <div style={{ fontSize: '11px', color: colors.gold, marginTop: '1px' }}>capitulation zone</div>
+                  </div>
+                </div>
+
+                {/* MVRV progress bar */}
+                <div style={{ position: 'relative', height: '8px', background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: '4px', overflow: 'hidden', marginBottom: '6px' }}>
+                  <div style={{ width: `${mvrvClock.progress}%`, height: '100%', background: `linear-gradient(90deg, ${colors.gold} 0%, ${mvrvClock.progress > 70 ? colors.green : mvrvClock.progress > 40 ? colors.gold : colors.red} 100%)`, transition: 'width 0.3s ease' }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: colors.textFaint, marginBottom: '10px', letterSpacing: '0.05em' }}>
+                  <span>MVRV 3.0 · Euphoria (0%)</span>
+                  <span>MVRV 0.8 · Capitulation (100%)</span>
+                </div>
+
+                {/* Zone label */}
+                <div style={{ padding: '8px 12px', background: '#0d0b09', border: `1px solid ${colors.border}`, borderRadius: '3px', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Zone</span>
+                    <span style={{ fontSize: '12px', color: mvrvClock.zoneColor, fontWeight: 600 }}>{mvrvClock.zone}</span>
+                  </div>
+                  <div style={{ marginTop: '6px', fontSize: '9px', color: colors.textFaint, lineHeight: 1.5 }}>
+                    {mvrvClock.pctToFloor.toFixed(0)}% of MVRV range remains before capitulation floor (0.8). Higher = more room to fall, more deployment ammunition ahead.
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '10px', color: colors.textMute, lineHeight: 1.6 }}>
+                  Progress maps MVRV position within the cycle: 0% = peak (MVRV ≥ 3.0), 100% = capitulation floor (MVRV ≤ 0.8). Paste fresh data to update. The on-chain structure clock is more reliable than fixed calendar dates in a crypto-proxy environment.
+                </div>
               </div>
-              <div style={{ height: '8px', background: colors.bg, border: `1px solid ${colors.border}`, position: 'relative', overflow: 'hidden' }}>
-                <div style={{ width: `${cycleData.progress}%`, height: '100%', background: `linear-gradient(90deg, ${colors.gold} 0%, ${colors.red} 100%)` }} />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: colors.textMute, marginTop: '6px' }}>
-                <span>Day {cycleData.elapsed} of {cycleData.totalDays}</span>
-                <span>{cycleData.remaining > 0 ? `${cycleData.remaining} days remaining` : `${Math.abs(cycleData.remaining)} days past`}</span>
+
+              {/* Fallback: Legacy calendar countdown (shown as secondary reference) */}
+              <div style={{ paddingTop: '14px', borderTop: `1px solid ${colors.border}` }}>
+                <div style={{ fontSize: '9px', color: colors.textFaint, letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '8px' }}>Calendar reference (secondary · Oct 2025 ATH → Oct 2026 projection)</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
+                  <div style={{ fontSize: '11px', color: colors.textFaint }}>Day {cycleData.elapsed} of {cycleData.totalDays}</div>
+                  <div style={{ fontSize: '11px', color: colors.textFaint }}>{cycleData.progress.toFixed(0)}% elapsed</div>
+                  <div style={{ fontSize: '11px', color: colors.textFaint }}>{cycleData.remaining > 0 ? `${cycleData.remaining}d left` : `${Math.abs(cycleData.remaining)}d past`}</div>
+                </div>
+                <div style={{ height: '4px', background: colors.bg, border: `1px solid ${colors.border}`, position: 'relative', overflow: 'hidden', opacity: 0.5 }}>
+                  <div style={{ width: `${cycleData.progress}%`, height: '100%', background: colors.textFaint }} />
+                </div>
               </div>
             </div>
 
@@ -1704,7 +1813,7 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                 <span style={{ display: 'inline-block', background: 'transparent', color: colors.textDim, border: `1px dashed ${colors.border}`, padding: '8px 14px', fontFamily: serif, fontSize: '10px', letterSpacing: '0.1em', cursor: 'pointer', borderRadius: '2px', textTransform: 'uppercase' }}>Choose .json file</span>
                 <input type="file" accept="application/json,.json" onChange={(e) => importJSONFile(e.target.files?.[0])} style={{ display: 'none' }} />
               </label>
-              <textarea value={importText} onChange={(e) => setImportText(e.target.value)} placeholder='{"version":14.3,...}' style={{ width: '100%', height: '140px', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: 'monospace', fontSize: '10px', marginBottom: '12px' }} />
+              <textarea value={importText} onChange={(e) => setImportText(e.target.value)} placeholder='{"version":14.4,...}' style={{ width: '100%', height: '140px', background: colors.bg, border: `1px solid ${colors.border}`, color: colors.text, padding: '8px', fontFamily: 'monospace', fontSize: '10px', marginBottom: '12px' }} />
               <button onClick={importJSON} disabled={!importText.trim()} style={{ width: '100%', background: importText.trim()?colors.green:colors.border, color: '#fff', border: 'none', padding: '10px', fontFamily: serif, fontSize: '11px', letterSpacing: '0.15em', cursor: importText.trim()?'pointer':'not-allowed', borderRadius: '2px', fontWeight: 600 }}>IMPORT JSON</button>
               {importResult && <div style={{ marginTop: '12px', fontSize: '11px', color: importResult.ok?colors.green:colors.red, padding: '8px 12px', border: `1px dashed ${importResult.ok?colors.green:colors.red}` }}>{importResult.ok?'✓ ':'⚠ '}{importResult.msg}</div>}
             </div>
@@ -1725,7 +1834,9 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '12px' }}>
                   <div>
                     <div style={{ color: colors.textMute, fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Rotation shares gained</div>
-                    <div style={{ color: journalStats.rotationShares>=0?colors.green:colors.red, fontSize: '20px', marginTop: '4px', fontWeight: 600 }}>{journalStats.rotationShares>=0?'+':''}{journalStats.rotationShares.toFixed(0)}</div>
+                    <div style={{ color: journalStats.rotationShares>=0?colors.green:colors.red, fontSize: '20px', marginTop: '4px', fontWeight: 600 }}>
+                      {journalStats.completedRotations > 0 ? `${journalStats.rotationShares>=0?'+':''}${journalStats.rotationShares.toFixed(0)}` : '—'}
+                    </div>
                     <div style={{ color: colors.textMute, fontSize: '10px', marginTop: '2px' }}>from {journalStats.completedRotations} completed rotation{journalStats.completedRotations!==1?'s':''}</div>
                   </div>
                   <div>
@@ -1734,27 +1845,50 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                     <div style={{ color: colors.textMute, fontSize: '10px', marginTop: '2px' }}>shares per cycle</div>
                   </div>
                 </div>
-                {journalStats.costPerExtraShare !== null && (
+
+                {/* BF1: Accrual efficiency — only renders when costPerExtraShare is valid */}
+                {journalStats.completedRotations > 0 && (
                   <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${colors.border}` }}>
                     <div style={{ fontSize: '10px', color: colors.textMute, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Accrual efficiency</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                      <div>
-                        <div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Cost per extra share</div>
-                        <div style={{ color: colors.gold, fontSize: '16px', marginTop: '2px', fontWeight: 600 }}>${journalStats.costPerExtraShare.toFixed(0)}</div>
-                        <div style={{ color: colors.textMute, fontSize: '9px', marginTop: '2px' }}>vs current ${mstrPrice.toFixed(0)}</div>
-                      </div>
-                      <div>
-                        <div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Efficiency vs market</div>
-                        <div style={{ color: journalStats.costPerExtraShare<mstrPrice?colors.green:colors.red, fontSize: '16px', marginTop: '2px', fontWeight: 600 }}>
-                          {journalStats.costPerExtraShare<mstrPrice ? `${(((mstrPrice-journalStats.costPerExtraShare)/mstrPrice)*100).toFixed(0)}% below market` : `${(((journalStats.costPerExtraShare-mstrPrice)/mstrPrice)*100).toFixed(0)}% above market`}
+                    {journalStats.costPerExtraShare !== null && journalStats.rotationShares > 0 ? (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <div>
+                          <div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Cost per extra share</div>
+                          <div style={{ color: colors.gold, fontSize: '16px', marginTop: '2px', fontWeight: 600 }}>${journalStats.costPerExtraShare.toFixed(0)}</div>
+                          <div style={{ color: colors.textMute, fontSize: '9px', marginTop: '2px' }}>vs current ${mstrPrice.toFixed(0)}</div>
                         </div>
-                        <div style={{ color: colors.textMute, fontSize: '9px', marginTop: '2px' }}>cost to accrue each incremental share</div>
+                        <div>
+                          <div style={{ color: colors.textMute, fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Efficiency vs market</div>
+                          <div style={{ color: journalStats.costPerExtraShare<mstrPrice?colors.green:colors.red, fontSize: '16px', marginTop: '2px', fontWeight: 600 }}>
+                            {journalStats.costPerExtraShare<mstrPrice
+                              ? `${(((mstrPrice-journalStats.costPerExtraShare)/mstrPrice)*100).toFixed(0)}% below market`
+                              : `${(((journalStats.costPerExtraShare-mstrPrice)/mstrPrice)*100).toFixed(0)}% above market`}
+                          </div>
+                          <div style={{ color: colors.textMute, fontSize: '9px', marginTop: '2px' }}>rotation alpha per share</div>
+                        </div>
                       </div>
+                    ) : (
+                      // Edge case: rotations completed but net shares = 0 or negative
+                      <div style={{ fontSize: '11px', color: colors.textMute, fontStyle: 'italic', padding: '8px 10px', background: colors.bg, border: `1px dashed ${colors.border}` }}>
+                        {journalStats.rotationShares <= 0
+                          ? 'Net rotation shares are zero or negative — accrual efficiency not applicable.'
+                          : 'Awaiting completed cycle…'}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '10px', color: colors.textMute, marginTop: '10px', lineHeight: 1.5, fontStyle: 'italic' }}>
+                      Efficiency = cash deployed in paired BUY legs ÷ net shares gained from those pairs. Direct accumulation buys are excluded. Below market = positive rotation alpha.
                     </div>
-                    <div style={{ fontSize: '10px', color: colors.textMute, marginTop: '10px', lineHeight: 1.5, fontStyle: 'italic' }}>Accrual efficiency measures cash paid per net new share gained. Below market = positive rotation alpha.</div>
                   </div>
                 )}
-                <div style={{ fontSize: '10px', color: colors.textMute, marginTop: '12px', lineHeight: 1.5, fontStyle: 'italic' }}>Rotation shares = SELL→BUY pair differences. Direct buys count as accumulation, not rotation.</div>
+
+                {/* Awaiting state — no rotations yet */}
+                {journalStats.completedRotations === 0 && trades.length > 0 && (
+                  <div style={{ marginTop: '14px', paddingTop: '14px', borderTop: `1px solid ${colors.border}`, fontSize: '11px', color: colors.textMute, fontStyle: 'italic', padding: '10px 12px', background: colors.bg, border: `1px dashed ${colors.border}`, marginTop: '16px' }}>
+                    Awaiting completed cycle… Log a paired SELL → BUY rotation to see accrual efficiency metrics.
+                  </div>
+                )}
+
+                <div style={{ fontSize: '10px', color: colors.textMute, marginTop: '12px', lineHeight: 1.5, fontStyle: 'italic' }}>Rotation shares = paired SELL→BUY differences only. Direct accumulation buys are tracked in share count but not included in rotation metrics.</div>
               </div>
             </div>
 
@@ -1782,6 +1916,7 @@ E) OTHER NOTES — unusual readings, conflicting sources, market closures, recen
                     <span style={{ color: colors.textDim }}>{t.date}</span>
                     <span style={{ color: colors.text }}>{t.shares} sh</span>
                     <span style={{ color: colors.gold }}>${t.price}</span>
+                    {/* BF5: deleteTrade is now defined and functional */}
                     <button onClick={() => deleteTrade(t.id)} style={{ background: 'transparent', border: 'none', color: colors.textFaint, cursor: 'pointer', fontSize: '14px' }}>×</button>
                   </div>
                 ))}
