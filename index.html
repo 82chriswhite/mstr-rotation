@@ -448,9 +448,12 @@ function MSTRCycleTool() {
     if(mode==='HOARD'){
       if(p>=d.hoard.sellLow&&p<=d.hoard.sellHigh)hits.push({tag:'HOARD-SELL',side:'SELL',label:'HOARD sell zone hit',zone:`${fmt(d.hoard.sellLow)}–${fmt(d.hoard.sellHigh)}`,price:p});
       const t=d.hoard.buyTarget;
-      if(p>=t*0.985&&p<=t*1.015)hits.push({tag:'HOARD-BUY',side:'BUY',label:'HOARD buy target reached',zone:fmt(t),price:p});
+      if(p>=t*0.985&&p<=t*1.015)hits.push({tag:'HOARD-BUY',side:'BUY',label:'HOARD buy target reached',zone:fmt(t),price:p,atTarget:true,pctBelowTarget:0});
       const dt=d.hoard.buyDeepTarget;
-      if(p<=dt*1.015)hits.push({tag:'HOARD-BUY-DEEP',side:'BUY',label:'HOARD deep buy target reached',zone:fmt(dt),price:p});
+      const deepAtTarget=p>=dt*0.985&&p<=dt*1.015;
+      const deepBelowTarget=p<dt*0.985;
+      const deepPctBelow=dt>0?((dt-p)/dt*100):0;
+      if(p<=dt*1.015)hits.push({tag:'HOARD-BUY-DEEP',side:'BUY',label:deepAtTarget?'HOARD deep buy target reached':`HOARD deep target — ${deepPctBelow.toFixed(1)}% below`,zone:fmt(dt),price:p,atTarget:deepAtTarget,pctBelowTarget:deepBelowTarget?deepPctBelow:0});
     }
     if(mode==='DEPLOY'){
       d.deploy.ladder.forEach((rung,i)=>{
@@ -1077,18 +1080,26 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
               // HOARD mode below its mandatory 40% cash floor suppresses all executable buy signals.
               const buyGateFailed=mode==='HOARD'&&portfolio.cashPct<HOARD_CASH_MIN_PCT;
               if(buyGateFailed){
-                // Muted / restricted state — price target reached but liquidity is insufficient
+                // Muted / restricted state — price at or below target but liquidity is insufficient.
+                // Badge text and label must reflect actual price relationship to target, not a static "reached".
                 return(<div style={{background:'#111318',border:'1px solid #2a3040',padding:'12px',borderRadius:'3px'}}>
                   <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:'#7a8aaa',marginBottom:'8px',fontWeight:600}}>● Watching local floor</div>
-                  {bh.map(h=><div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px',gap:'8px'}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:'12px',fontWeight:600,color:'#a0aac0'}}>{h.label}</div>
-                      <div style={{fontSize:'11px',color:'#5a6478'}}>@ {h.zone}</div>
-                    </div>
-                    <div style={{background:'#1c2030',border:'1px solid #2a3040',color:'#c8b84a',padding:'6px 10px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',fontWeight:700,borderRadius:'2px',textAlign:'center',whiteSpace:'nowrap',lineHeight:1.3}}>
-                      TARGET REACHED<br/>LIQUIDITY RESTRICTED
-                    </div>
-                  </div>)}
+                  {bh.map(h=>{
+                    // Derive actual price-to-target relationship from the hit data
+                    const isAtTarget=h.atTarget!==false&&(h.pctBelowTarget===undefined||h.pctBelowTarget===0);
+                    const pctBelow=h.pctBelowTarget||0;
+                    const badgeText=isAtTarget?'AT TARGET\nLIQUIDITY RESTRICTED':`${pctBelow.toFixed(1)}% BELOW\nLIQUIDITY RESTRICTED`;
+                    const statusLabel=isAtTarget?h.label:`Price ${pctBelow.toFixed(1)}% below ${h.zone} target`;
+                    return(<div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px',gap:'8px'}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:'12px',fontWeight:600,color:'#a0aac0'}}>{statusLabel}</div>
+                        <div style={{fontSize:'11px',color:'#5a6478'}}>target @ {h.zone} · now ${h.price.toFixed(2)}</div>
+                      </div>
+                      <div style={{background:'#1c2030',border:'1px solid #2a3040',color:isAtTarget?'#c8b84a':'#7a8aaa',padding:'6px 10px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',fontWeight:700,borderRadius:'2px',textAlign:'center',whiteSpace:'nowrap',lineHeight:1.3}}>
+                        {isAtTarget?<>AT TARGET<br/>LIQUIDITY RESTRICTED</>:<>{pctBelow.toFixed(1)}% BELOW<br/>LIQUIDITY RESTRICTED</>}
+                      </div>
+                    </div>);
+                  })}
                   <div style={{marginTop:'10px',padding:'7px 10px',background:'#0d1018',border:'1px dashed #2a3040',borderRadius:'3px',fontSize:'9px',color:'#7a8aaa',lineHeight:1.5}}>
                     ⛔ CASH HOARD regime requires ≥{HOARD_CASH_MIN_PCT}% cash. Current: <span style={{color:'#c8b84a',fontWeight:600}}>{portfolio.cashPct.toFixed(1)}%</span>. Executable buy suspended until cash buffer is restored.
                   </div>
