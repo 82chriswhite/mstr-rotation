@@ -1088,8 +1088,6 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
               // HOARD mode below its mandatory 40% cash floor suppresses all executable buy signals.
               const buyGateFailed=mode==='HOARD'&&portfolio.cashPct<HOARD_CASH_MIN_PCT;
               if(buyGateFailed){
-                // Muted / restricted state — price is AT a target but liquidity is insufficient.
-                // (Banner only appears at ±1.5% of target — overshoot cases show no banner.)
                 return(<div style={{background:'#111318',border:'1px solid #2a3040',padding:'12px',borderRadius:'3px'}}>
                   <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:'#7a8aaa',marginBottom:'8px',fontWeight:600}}>● At target · buy suspended</div>
                   {bh.map(h=><div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px',gap:'8px'}}>
@@ -1129,35 +1127,39 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
             <div>
               <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginBottom:'6px'}}>Buy zone</div>
               {mode==='HOARD'&&priceRange?(()=>{
-                // Price-aware HOARD buy zone: text changes based on where price sits relative to targets
-                const {target,deep}=priceRange;
+                const {target,deep,sellLow}=priceRange;
                 const atT=target&&mstrPrice>=target*0.985&&mstrPrice<=target*1.015;
                 const atD=deep&&mstrPrice>=deep*0.985&&mstrPrice<=deep*1.015;
                 const belowD=deep&&mstrPrice<deep*0.985;
                 const aboveT=target&&mstrPrice>target*1.015;
-                let buyText,subText,subColor=C.gold;
-                if(aboveT){
-                  // Above both targets — standard "wait" message
-                  buyText=`Wait — target ${fmt(target)}${deep?` / deep ${fmt(deep)}`:''}`;
-                  subText=`Alert $${target.toFixed(2)}${deep?` + $${deep.toFixed(2)} deep`:''}`;
-                }else if(atT){
-                  buyText=`At target — ${fmt(target)}`;
-                  subText='Price at buy target';subColor=C.green;
-                }else if(atD){
-                  buyText=`At deep target — ${fmt(deep)}`;
-                  subText='Price at deep buy target';subColor=C.green;
-                }else if(belowD){
-                  // Price has overshot below deep target — do not suggest buying
-                  buyText='Below deep target';
-                  subText=`Hold cash · target ${fmt(target)} / deep ${fmt(deep)}`;subColor=C.mute;
-                }else{
-                  // Between targets
-                  buyText=`Wait — deep target ${fmt(deep)}`;
-                  subText=`Alert $${deep?deep.toFixed(2):'—'}`;
+                if(belowD){
+                  // Price has overshot below both targets. Buy targets are not the relevant reference —
+                  // the sell zone is. No numbers to "aim at", just hold and wait for recovery.
+                  return(<>
+                    <div style={{color:C.mute,fontWeight:600,fontSize:'13px',lineHeight:1.3}}>No buy zone</div>
+                    <div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.faint,marginTop:'6px',fontWeight:500,lineHeight:1.6}}>
+                      Both targets overshot<br/>Hold cash · sell on recovery{sellLow?` >${fmt(sellLow)}`:''}
+                    </div>
+                  </>);
                 }
+                if(atT) return(<>
+                  <div style={{color:C.green,fontWeight:600,fontSize:'13px'}}>{fmt(target)}</div>
+                  <div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.green,marginTop:'6px',fontWeight:500}}>At buy target</div>
+                </>);
+                if(atD) return(<>
+                  <div style={{color:C.green,fontWeight:600,fontSize:'13px'}}>{fmt(deep)}</div>
+                  <div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.green,marginTop:'6px',fontWeight:500}}>At deep target</div>
+                </>);
+                // Above target or between targets — show standard wait text with alerts
+                const showDeep=!aboveT&&deep;
                 return(<>
-                  <div style={{color:atT||atD?C.green:belowD?C.mute:C.hi,fontWeight:600,fontSize:'13px',lineHeight:1.3}}>{buyText}</div>
-                  <div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:subColor,marginTop:'6px',fontWeight:500,lineHeight:1.5}}>{subText}</div>
+                  <div style={{color:C.hi,fontWeight:600,fontSize:'13px',lineHeight:1.3}}>
+                    {aboveT?`Wait — ${fmt(target)}${deep?` / ${fmt(deep)}`:''}`:`Wait — deep ${fmt(deep)}`}
+                  </div>
+                  <div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500,lineHeight:1.5}}>
+                    {aboveT?`Alert $${target.toFixed(2)}${deep?` + $${deep.toFixed(2)} deep`:''}`:
+                             `Alert $${deep.toFixed(2)} deep`}
+                  </div>
                 </>);
               })():(
                 <>
