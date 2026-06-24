@@ -593,9 +593,20 @@ function MSTRCycleTool() {
     }
     if(mode==='HOARD'){
       const target=d.hoard.buyTarget;
+      const deep=d.hoard.buyDeepTarget;
       const pctToTarget=((p/target)-1)*100;
-      const inSell=p>=d.hoard.sellLow,atTarget=p<=target*1.015;
-      return{pct:null,verdict:inSell?'IN SELL ZONE':atTarget?'AT BUY TARGET':`${pctToTarget>0?'+':''}${pctToTarget.toFixed(1)}% vs target`,tone:inSell?RED:atTarget?GREEN:GOLD,target,deep:d.hoard.buyDeepTarget,sellLow:d.hoard.sellLow,sellHigh:d.hoard.sellHigh};
+      const inSell=p>=d.hoard.sellLow;
+      const atTarget=p>=target*0.985&&p<=target*1.015;
+      const atDeep=deep&&p>=deep*0.985&&p<=deep*1.015;
+      const belowDeep=deep&&p<deep*0.985;
+      const pctToDeep=deep&&deep>0?((p/deep)-1)*100:null;
+      let verdict,tone;
+      if(inSell){verdict='IN SELL ZONE';tone=RED;}
+      else if(atTarget){verdict='AT BUY TARGET';tone=GREEN;}
+      else if(atDeep){verdict='AT DEEP TARGET';tone=GREEN;}
+      else if(belowDeep){verdict=`${Math.abs(pctToDeep).toFixed(1)}% BELOW DEEP TARGET`;tone=GOLD;}
+      else{verdict=`${Math.abs(pctToTarget).toFixed(1)}% BELOW TARGET`;tone=GOLD;}
+      return{pct:null,verdict,tone,target,deep,sellLow:d.hoard.sellLow,sellHigh:d.hoard.sellHigh};
     }
     const liveRungs=d.deploy.ladder.filter(r=>p<=r.level*1.015);
     return{pct:null,verdict:liveRungs.length>0?`${liveRungs.length}/4 RUNGS LIVE`:'ABOVE LADDER',tone:GREEN,ladder:d.deploy.ladder};
@@ -1081,14 +1092,12 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
               const buyGateFailed=mode==='HOARD'&&portfolio.cashPct<HOARD_CASH_MIN_PCT;
               if(buyGateFailed){
                 // Muted / restricted state — price at or below target but liquidity is insufficient.
-                // Badge text and label must reflect actual price relationship to target, not a static "reached".
+                // Badge and label reflect actual price relationship to target, not a static "reached".
                 return(<div style={{background:'#111318',border:'1px solid #2a3040',padding:'12px',borderRadius:'3px'}}>
                   <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:'#7a8aaa',marginBottom:'8px',fontWeight:600}}>● Watching local floor</div>
                   {bh.map(h=>{
-                    // Derive actual price-to-target relationship from the hit data
-                    const isAtTarget=h.atTarget!==false&&(h.pctBelowTarget===undefined||h.pctBelowTarget===0);
+                    const isAtTarget=h.atTarget===true;
                     const pctBelow=h.pctBelowTarget||0;
-                    const badgeText=isAtTarget?'AT TARGET\nLIQUIDITY RESTRICTED':`${pctBelow.toFixed(1)}% BELOW\nLIQUIDITY RESTRICTED`;
                     const statusLabel=isAtTarget?h.label:`Price ${pctBelow.toFixed(1)}% below ${h.zone} target`;
                     return(<div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px',gap:'8px'}}>
                       <div style={{flex:1,minWidth:0}}>
