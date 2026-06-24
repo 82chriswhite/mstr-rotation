@@ -418,15 +418,21 @@ function MSTRCycleTool() {
     return s;
   },[mstrPrice,btcPrice,nupl,mvrv,derivativesExhaustion,cycleData,mNAV,btcBelowSthCost,mstrShortInt]);
 
+  // Named thresholds for the DEPLOY regime (avoids scattered magic numbers)
+  const DEPLOY_SCORE_MIN=7;          // bottomScore at/above this flips to DEPLOY (price permitting)
+  const DEPLOY_PRICE_CEILING=140;    // MSTR must be below this for DEPLOY
+  const DEPLOY_IMMINENT_PRICE=160;   // "approaching" warning suppressed above this price
+  const DEPLOY_IMMINENT_SCORE_MIN=4; // widened lower bound so a multi-point jump can't skip the warning
+
   const mode=useMemo(()=>{
-    if(bottomScore>=7&&mstrPrice<140)return'DEPLOY';
+    if(bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice<DEPLOY_PRICE_CEILING)return'DEPLOY';
     if(bearScore>=6)return'HOARD';
     return'ROTATE';
   },[bearScore,bottomScore,mstrPrice]);
 
   const deployImminent=useMemo(()=>{
     if(mode!=='HOARD')return false;
-    return bottomScore>=5&&bottomScore<=6&&mstrPrice<160;
+    return bottomScore>=DEPLOY_IMMINENT_SCORE_MIN&&bottomScore<DEPLOY_SCORE_MIN&&mstrPrice<DEPLOY_IMMINENT_PRICE;
   },[mode,bottomScore,mstrPrice]);
 
   const fmt=v=>`$${Math.round(v)}`;
@@ -570,7 +576,7 @@ function MSTRCycleTool() {
   };
   const cfg=modeCfg[mode];
   const currentLevels=levelDisplay[mode.toLowerCase()];
-  const deploySuppressed=bottomScore>=7&&mstrPrice>=140;
+  const deploySuppressed=bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice>=DEPLOY_PRICE_CEILING;
 
   const priceRange=useMemo(()=>{
     if(!dynamicLevels)return null;
@@ -1013,11 +1019,16 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
       )}
 
       {/* MODE CARD */}
-      <div style={{background:cfg.bg,border:`1px solid ${cfg.color}`,padding:'20px',marginBottom:'20px'}}>
+      {(()=>{const modeStale=freshness.tier==='red'||confidence==='LOW';return(
+      <div style={{background:modeStale?'#12100e':cfg.bg,border:`1px solid ${modeStale?C.faint:cfg.color}`,padding:'20px',marginBottom:'20px',opacity:modeStale?0.82:1,position:'relative'}}>
+        {modeStale&&<div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'14px',padding:'8px 10px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px'}}>
+          <span style={{fontSize:'13px',lineHeight:1}}>🚨</span>
+          <span style={{fontSize:'10px',color:C.red,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',lineHeight:1.4}}>Mode computed on {freshness.tier==='red'?'stale':'low-confidence'} data — verify before acting</span>
+        </div>}
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'18px',gap:'16px',flexWrap:'wrap'}}>
           <div style={{flex:'1 1 auto',minWidth:0}}>
-            <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:cfg.color,marginBottom:'6px'}}>Active mode</div>
-            <div style={{fontSize:'20px',color:cfg.color,fontWeight:600,letterSpacing:'0.02em',lineHeight:1.1}}>{cfg.label}</div>
+            <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:modeStale?C.mute:cfg.color,marginBottom:'6px'}}>Active mode{modeStale&&<span style={{color:C.red,marginLeft:'6px',fontWeight:700}}>· STALE</span>}</div>
+            <div style={{fontSize:'20px',color:modeStale?C.dim:cfg.color,fontWeight:600,letterSpacing:'0.02em',lineHeight:1.1}}>{cfg.label}</div>
           </div>
           <div style={{flex:'0 0 auto',textAlign:'right'}}>
             <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginBottom:'6px'}}>MSTR</div>
@@ -1041,9 +1052,9 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
 
         <div style={{fontSize:'13px',color:C.text,lineHeight:1.55,marginBottom:'18px'}}>{cfg.action}</div>
 
-        {deployImminent&&<div style={{marginBottom:'14px',padding:'12px 14px',background:'#111a12',border:`1px solid ${C.green}`,borderRadius:'3px'}}><div style={{color:C.green,fontSize:'12px',fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'4px'}}>● DEPLOY approaching</div><div style={{color:C.dim,fontSize:'11px',lineHeight:1.55}}>Bottom score is <span style={{color:C.green,fontWeight:600}}>{bottomScore}/20</span> — {mstrPrice<140?<>{7-bottomScore} more point{7-bottomScore!==1?'s':''} needed to flip to DEPLOY.</>:<>{7-bottomScore} point{7-bottomScore!==1?'s':''} and a break below $140 will flip to DEPLOY.</>}</div></div>}
+        {deployImminent&&<div style={{marginBottom:'14px',padding:'12px 14px',background:'#111a12',border:`1px solid ${C.green}`,borderRadius:'3px'}}><div style={{color:C.green,fontSize:'12px',fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'4px'}}>● DEPLOY approaching</div><div style={{color:C.dim,fontSize:'11px',lineHeight:1.55}}>Bottom score is <span style={{color:C.green,fontWeight:600}}>{bottomScore}/20</span> — {mstrPrice<DEPLOY_PRICE_CEILING?<>{DEPLOY_SCORE_MIN-bottomScore} more point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} needed to flip to DEPLOY.</>:<>{DEPLOY_SCORE_MIN-bottomScore} point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} and a break below ${DEPLOY_PRICE_CEILING} will flip to DEPLOY.</>}</div></div>}
         {ivRank!==null&&ivRank>75&&bearScore>=6&&<div style={{marginBottom:'14px',padding:'10px 12px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px',fontSize:'11px',color:C.red,lineHeight:1.5}}>⚡ IV Rank {ivRank} — peak options speculation zone. +1 bear signal. Premium collapse risk elevated.</div>}
-        {deploySuppressed&&<div style={{fontSize:'11px',color:C.gold,marginBottom:'14px',padding:'10px 12px',background:'#1a1611',border:`1px dashed ${C.gold}`,borderRadius:'3px'}}>⚠ Bottom score at deploy threshold, but MSTR still above $140. Holding HOARD.</div>}
+        {deploySuppressed&&<div style={{fontSize:'11px',color:C.gold,marginBottom:'14px',padding:'10px 12px',background:'#1a1611',border:`1px dashed ${C.gold}`,borderRadius:'3px'}}>⚠ Bottom score at deploy threshold, but MSTR still above ${DEPLOY_PRICE_CEILING}. Holding HOARD.</div>}
         {levelsAuto&&!technicals&&<div style={{fontSize:'11px',color:C.red,marginBottom:'14px',padding:'10px 12px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px'}}>⚠ Auto-levels unavailable — paste a prompt response below, or switch to manual override.</div>}
         {mode==='DEPLOY'&&levelsAuto&&dynamicLevels&&<div style={{marginBottom:'14px',padding:'8px 12px',background:'#0d1510',border:`1px dashed ${C.green}`,borderRadius:'3px',fontSize:'10px',color:C.mute,lineHeight:1.5}}>
           {dynamicLevels.deploy.anchorMode==='sth'?<span>Ladder anchored to <span style={{color:C.green,fontWeight:600}}>STH realized price floor</span> — ${sthMstrFloor?.toFixed(2)} MSTR equivalent.</span>:dynamicLevels.deploy.anchorMode==='200ma'?<span>Ladder anchored to <span style={{color:C.gold}}>200-day MA</span>.</span>:<span>Ladder anchored to current price steps.</span>}
@@ -1201,7 +1212,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
             <span onClick={()=>setLevelsAuto(!levelsAuto)} style={{cursor:'pointer',color:levelsAuto?C.green:C.mute,letterSpacing:'0.05em',flexShrink:0}}>{levelsAuto?'● auto':'○ manual'}</span>
           </div>
         </div>
-      </div>{/* end MODE CARD */}
+      </div>);})()}{/* end MODE CARD */}
 
       {/* MANUAL LEVELS */}
       {!levelsAuto&&<div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
@@ -1409,8 +1420,8 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         <div style={{background:C.panel,padding:'16px',border:`1px solid ${C.border}`}}>
           <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Bottom signals</div>
           <div style={{fontSize:'28px',color:bottomScore>=7?C.green:C.gold,fontWeight:600}}>{bottomScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
-          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥7 + MSTR&lt;$140 → DEPLOY</div>
-          {deployImminent&&<div style={{fontSize:'9px',color:C.green,marginTop:'4px',fontWeight:600}}>{7-bottomScore} pt{7-bottomScore!==1?'s':''} to threshold ↑</div>}
+          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥{DEPLOY_SCORE_MIN} + MSTR&lt;${DEPLOY_PRICE_CEILING} → DEPLOY</div>
+          {deployImminent&&<div style={{fontSize:'9px',color:C.green,marginTop:'4px',fontWeight:600}}>{DEPLOY_SCORE_MIN-bottomScore} pt{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} to threshold ↑</div>}
         </div>
       </div>
 
