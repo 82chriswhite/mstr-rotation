@@ -703,6 +703,7 @@ Freshness rules:
 - If your top result is old, search again with "today", "current", or the actual date.
 - Do NOT extrapolate from training data memory. If you cannot cite a source under 7 days old, mark the field as estimated.
 - Weekend/holiday closes: note explicitly in STALE_FIELDS.
+- On weekends/market holidays, MSTR_PRICE and all MSTR technicals are the last session's close — list them in STALE_FIELDS. BTC_PRICE and on-chain metrics trade 24/7 and remain live; do NOT mark these stale solely because markets are closed.
 
 PHASE 3 — MANDATORY BALANCE SHEET MATH AUDIT
 CRITICAL: Do NOT extract the mNAV ratio from summary tracking sheets or external trackers. Calculate from scratch:
@@ -769,6 +770,7 @@ FIELD RULES:
 - MSTR_IV_RANK: 0=cheapest, 100=most expensive. IV>75 adds +1 bear signal.
 
 CONFIDENCE: HIGH = all live under 24h, no estimates. MEDIUM = 1-2 estimated/stale. LOW = 3+ or major field stale/uncertain.
+- HARD CAP: if ANY of MSTR_PRICE, BTC_PRICE, BTC_HOLDINGS, DILUTED_SHARES is estimated or older than 24h, CONFIDENCE cannot exceed LOW regardless of the count above — these four drive the tool's regime/mode and the mNAV recompute.
 
 POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit math. D) Confidence justification. E) Other notes.`;
 
