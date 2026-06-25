@@ -8,14 +8,19 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>MSTR Cycle Tool</title>
 <!--
-  MSTR CYCLE DECISION FRAMEWORK v14.8
-  Changes vs v14.7:
-  P1: Score breakdown — bear and bottom signals each show per-signal contribution, collapsible.
-  P2: Regime hysteresis — mode only commits after 2 consecutive paste-updates agree, preventing flicker at ceiling.
-  P3: Cash buffer timestamp — tracks when buffer was last manually set; warns when stale >7d in HOARD.
-  P4: Paste sanity checks — validates internal consistency of pasted block before applying (price vs range, high>low, mNAV plausibility).
-  P5: Regime change audit log — persisted log of mode transitions with scores, price, delta; shown in Snapshots tab.
-  All v14.7 features preserved intact.
+  MSTR CYCLE DECISION FRAMEWORK v14.9
+  Changes vs v14.8:
+  HOARD sell throttle: once portfolio cash % meets or exceeds HOARD_SELL_CEILING_PCT (40%),
+    the HOARD sell trigger is suppressed — no further selling until cash drops below the target.
+    Rationale: backtest showed the tool over-sold into the 2023 recovery because HOARD had no
+    stopping criterion. Once the 40% cash target is met, the HOARD objective is achieved;
+    additional selling is not required and risks eroding the position into a recovery.
+  UI additions:
+    - HOARD cash progress bar below mode card action text (progress toward 40% target).
+    - "Sell throttle active" state for the sell trigger panel when ceiling is met.
+    - Sell zone alert suppressed in level grid when throttled.
+    - New constant HOARD_SELL_CEILING_PCT = 40 (same value as cash gate floor for symmetry).
+  All v14.8 features preserved intact.
 -->
 <script>
   const PASSWORD_HASH = '021ab4d101785587d5ddc3e3715150393924c9df228cb6732c40da48a6cfc7c4';
@@ -699,7 +704,18 @@ function MSTRCycleTool() {
     return{positionUSD,positionGBP,totalGBP,cashPct,positionPct:100-cashPct};
   },[journalStats.currentShares,mstrPrice,gbpUsd,cashBuffer]);
 
-  const HOARD_CASH_MIN_PCT=40; // Minimum cash % required in HOARD regime before any buy is permitted
+  const HOARD_CASH_MIN_PCT=40;  // Minimum cash % required in HOARD before any buy is permitted
+  const HOARD_SELL_CEILING_PCT=40; // Once cash % meets this, HOARD sell trigger is suppressed.
+  // Backtest evidence: without this ceiling the tool over-sells into recoveries —
+  // the HOARD objective (40% cash) is already achieved, so further selling is counterproductive.
+  // Both constants share the same value intentionally: the floor for buying and the ceiling for
+  // selling are symmetric, creating a stable band around the 40% target.
+
+  // Derived: is the HOARD sell throttle currently active?
+  // True only in HOARD regime when cash already meets or exceeds the sell ceiling.
+  const hoardSellThrottled=useMemo(()=>
+    mode==='HOARD'&&portfolio.cashPct>=HOARD_SELL_CEILING_PCT
+  ,[mode,portfolio.cashPct]);
 
   const sizingGuardrail=useMemo(()=>{
     const currentSh=journalStats.currentShares;
@@ -707,12 +723,18 @@ function MSTRCycleTool() {
     const maxSharesFromPosition=Math.floor(currentSh*profile.rotationSizePctHigh/100);
     const cashUSD=cashBuffer*gbpUsd;
     const maxSharesFromCash=mstrPrice>0?Math.floor(cashUSD/mstrPrice):0;
-    // CASH GATE: If in HOARD regime and cash buffer is below the mandatory 40% floor,
-    // force max buy allocation to zero — no buys permitted regardless of price signals.
+    // CASH GATE: block buys in HOARD until cash ≥ 40%
     const cashGateFailed=mode==='HOARD'&&portfolio.cashPct<HOARD_CASH_MIN_PCT;
     const maxBuyShares=cashGateFailed?0:Math.min(maxSharesFromPosition,maxSharesFromCash>0?maxSharesFromCash:maxSharesFromPosition);
-    const maxSellShares=maxSharesFromPosition;
-    return{maxSellShares,maxBuyShares,maxSellGBP:(maxSellShares*mstrPrice)/gbpUsd,maxBuyGBP:(maxBuyShares*mstrPrice)/gbpUsd,pctUsed:profile.rotationSizePctHigh,cashGateFailed,cashGateReason:cashGateFailed?`HOARD regime requires ≥${HOARD_CASH_MIN_PCT}% cash — current ${portfolio.cashPct.toFixed(1)}%`:null};
+    // SELL THROTTLE: suppress sells in HOARD once cash ≥ 40% — objective already met
+    const sellThrottled=mode==='HOARD'&&portfolio.cashPct>=HOARD_SELL_CEILING_PCT;
+    const maxSellShares=sellThrottled?0:maxSharesFromPosition;
+    return{maxSellShares,maxBuyShares,
+      maxSellGBP:(maxSellShares*mstrPrice)/gbpUsd,
+      maxBuyGBP:(maxBuyShares*mstrPrice)/gbpUsd,
+      pctUsed:profile.rotationSizePctHigh,
+      cashGateFailed,cashGateReason:cashGateFailed?`HOARD regime requires ≥${HOARD_CASH_MIN_PCT}% cash — current ${portfolio.cashPct.toFixed(1)}%`:null,
+      sellThrottled,sellThrottleReason:sellThrottled?`Cash target met (${portfolio.cashPct.toFixed(1)}% ≥ ${HOARD_SELL_CEILING_PCT}%) — sell throttle active`:null};
   },[journalStats.currentShares,profile,cashBuffer,gbpUsd,mstrPrice,mode,portfolio.cashPct]);
 
   const thesisPerf=useMemo(()=>{
@@ -966,7 +988,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
   const deletePosition=id=>{const updated=positions.filter(p=>p.id!==id);setPositions(updated);try{localStorage.setItem('mstr:positions',JSON.stringify(updated));}catch(e){}};
   const deleteSnapshot=date=>{setSnapshots(prev=>{const updated=prev.filter(s=>s.date!==date);try{localStorage.setItem('mstr:snapshots',JSON.stringify(updated));}catch(e){}return updated;});};
 
-  const buildExportPayload=()=>({version:14.8,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,cashBufferUpdated},trades,snapshots,positions,misses,regimeLog});
+  const buildExportPayload=()=>({version:14.9,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,cashBufferUpdated},trades,snapshots,positions,misses,regimeLog});
 
   const exportJSON=async()=>{const text=JSON.stringify(buildExportPayload(),null,2);try{await navigator.clipboard.writeText(text);setImportResult({ok:true,msg:`Exported ${trades.length} trades, ${positions.length} positions, ${snapshots.length} snapshots.`});}catch(e){setImportResult({ok:true,msg:'Export ready below — copy manually.',payload:text});}setTimeout(()=>setImportResult(null),8000);};
   const exportJSONFile=()=>{const text=JSON.stringify(buildExportPayload(),null,2);const blob=new Blob([text],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');const stamp=new Date().toISOString().slice(0,10);a.href=url;a.download=`mstr-cycle-${stamp}.json`;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(url),1000);setImportResult({ok:true,msg:`Downloaded mstr-cycle-${stamp}.json`});setTimeout(()=>setImportResult(null),6000);};
@@ -1076,7 +1098,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
 
     {/* HEADER */}
     <div style={{marginBottom:'24px',borderBottom:`1px solid ${C.border}`,paddingBottom:'20px'}}>
-      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.8 · prompt v2</div>
+      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.9 · prompt v2</div>
       <h1 style={{fontSize:'26px',fontWeight:400,color:C.hi,margin:0,fontStyle:'italic'}}>MSTR Rotation</h1>
       <h2 style={{fontSize:'14px',fontWeight:400,color:C.dim,margin:'4px 0 12px 0',letterSpacing:'0.05em'}}>Rotate · Hoard · Deploy</h2>
       <div style={{display:'flex',gap:'16px',flexWrap:'wrap',fontSize:'12px',marginTop:'12px',alignItems:'center'}}>
@@ -1158,7 +1180,37 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
 
         <div style={{fontSize:'13px',color:C.text,lineHeight:1.55,marginBottom:'18px'}}>{cfg.action}</div>
 
-        {deployImminent&&<div style={{marginBottom:'14px',padding:'12px 14px',background:'#111a12',border:`1px solid ${C.green}`,borderRadius:'3px'}}><div style={{color:C.green,fontSize:'12px',fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'4px'}}>● DEPLOY approaching</div><div style={{color:C.dim,fontSize:'11px',lineHeight:1.55}}>Bottom score is <span style={{color:C.green,fontWeight:600}}>{bottomScore}/20</span> — {mstrPrice<dynamicCeiling?<>{DEPLOY_SCORE_MIN-bottomScore} more point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} needed to flip to DEPLOY.</>:<>{DEPLOY_SCORE_MIN-bottomScore} point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} and a break below ${dynamicCeiling} will flip to DEPLOY.</>}</div></div>}
+        {/* HOARD cash progress bar — shows progress toward the 40% sell-throttle / buy-gate target */}
+        {mode==='HOARD'&&(()=>{
+          const pct=Math.min(100,portfolio.cashPct);
+          const met=pct>=HOARD_SELL_CEILING_PCT;
+          const barColor=met?C.green:pct>20?C.gold:C.red;
+          const cashNeededGBP=met?0:Math.max(0,((HOARD_SELL_CEILING_PCT/100)*portfolio.totalGBP)-cashBuffer);
+          return(
+            <div style={{marginBottom:'16px',padding:'12px 14px',background:'#0f0d0a',border:`1px solid ${met?C.green:C.border}`,borderRadius:'3px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'8px'}}>
+                <span style={{fontSize:'10px',color:met?C.green:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',fontWeight:met?700:400}}>
+                  {met?'● Cash target met — sell throttle active':'Cash hoard progress'}
+                </span>
+                <span style={{fontSize:'13px',color:barColor,fontWeight:700}}>{pct.toFixed(1)}% / {HOARD_SELL_CEILING_PCT}%</span>
+              </div>
+              <div style={{position:'relative',height:'6px',background:'#1a1611',borderRadius:'3px',overflow:'hidden',marginBottom:'6px'}}>
+                <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${Math.min(100,(HOARD_SELL_CEILING_PCT/100)*100)}%`,background:'rgba(212,160,23,0.12)',borderRight:`1px dashed ${C.gold}`}}/>
+                <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${pct}%`,background:barColor,transition:'width 0.4s ease',borderRadius:'3px'}}/>
+              </div>
+              {met?(
+                <div style={{fontSize:'10px',color:C.green,lineHeight:1.5}}>
+                  HOARD objective achieved. Sell trigger suspended — hold position and wait for DEPLOY conditions or regime change.
+                </div>
+              ):(
+                <div style={{fontSize:'10px',color:C.dim,lineHeight:1.5}}>
+                  {cashNeededGBP>0?`≈ £${Math.round(cashNeededGBP).toLocaleString()} more cash needed to reach ${HOARD_SELL_CEILING_PCT}% target. `:''}
+                  Sell at resistance to build buffer. Once target met, sell throttle activates.
+                </div>
+              )}
+            </div>
+          );
+        })()}<div style={{marginBottom:'14px',padding:'12px 14px',background:'#111a12',border:`1px solid ${C.green}`,borderRadius:'3px'}}><div style={{color:C.green,fontSize:'12px',fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'4px'}}>● DEPLOY approaching</div><div style={{color:C.dim,fontSize:'11px',lineHeight:1.55}}>Bottom score is <span style={{color:C.green,fontWeight:600}}>{bottomScore}/20</span> — {mstrPrice<dynamicCeiling?<>{DEPLOY_SCORE_MIN-bottomScore} more point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} needed to flip to DEPLOY.</>:<>{DEPLOY_SCORE_MIN-bottomScore} point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} and a break below ${dynamicCeiling} will flip to DEPLOY.</>}</div></div>}
         {ivRank!==null&&ivRank>75&&bearScore>=6&&<div style={{marginBottom:'14px',padding:'10px 12px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px',fontSize:'11px',color:C.red,lineHeight:1.5}}>⚡ IV Rank {ivRank} — peak options speculation zone. +1 bear signal. Premium collapse risk elevated.</div>}
         {deploySuppressed&&<div style={{fontSize:'11px',color:C.gold,marginBottom:'14px',padding:'10px 12px',background:'#1a1611',border:`1px dashed ${C.gold}`,borderRadius:'3px'}}>⚠ Bottom score at deploy threshold, but MSTR still above ${dynamicCeiling}{sthMstrFloor!==null?` (STH floor $${sthMstrFloor.toFixed(2)} × 1.10)`:''}. Holding HOARD.</div>}
         {levelsAuto&&!technicals&&<div style={{fontSize:'11px',color:C.red,marginBottom:'14px',padding:'10px 12px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px'}}>⚠ Auto-levels unavailable — paste a prompt response below, or switch to manual override.</div>}
@@ -1168,13 +1220,31 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
 
         {bandHits.length>0&&(()=>{
           const sh=bandHits.filter(h=>h.side==='SELL'),bh=bandHits.filter(h=>h.side==='BUY');
-          return(<div style={{display:'grid',gridTemplateColumns:sh.length&&bh.length?'1fr 1fr':'1fr',gap:'10px',marginBottom:'18px'}}>
-            {sh.length>0&&<div style={{background:'rgba(199,62,29,0.08)',border:`1px solid ${C.red}`,padding:'12px',borderRadius:'3px'}}>
+          // Suppress sell panel entirely when HOARD sell throttle is active
+          const sellVisible=sh.length>0&&!hoardSellThrottled;
+          const sellThrottledVisible=sh.length>0&&hoardSellThrottled;
+          return(<div style={{display:'grid',gridTemplateColumns:(sellVisible||sellThrottledVisible)&&bh.length?'1fr 1fr':'1fr',gap:'10px',marginBottom:'18px'}}>
+            {sellVisible&&<div style={{background:'rgba(199,62,29,0.08)',border:`1px solid ${C.red}`,padding:'12px',borderRadius:'3px'}}>
               <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.red,marginBottom:'8px',fontWeight:600}}>● Sell trigger live</div>
               {sh.map(h=><div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px'}}>
                 <div style={{fontSize:'11px',color:C.text}}><div style={{fontSize:'12px',fontWeight:600}}>{h.label}</div><div style={{fontSize:'11px',color:C.dim}}>@ {h.zone}</div></div>
                 <button onClick={()=>{setView('positions');setPositionForm(pf=>({...pf,entryPrice:String(h.price),tag:h.tag}));}} style={{background:C.red,border:'none',color:'#fff',padding:'6px 12px',fontFamily:S,fontSize:'10px',letterSpacing:'0.12em',fontWeight:600,cursor:'pointer',borderRadius:'2px'}}>SELL</button>
               </div>)}
+            </div>}
+            {sellThrottledVisible&&<div style={{background:'#0f0d0a',border:`1px solid ${C.green}`,padding:'12px',borderRadius:'3px'}}>
+              <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.green,marginBottom:'8px',fontWeight:600}}>● Sell throttle active</div>
+              {sh.map(h=><div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px',gap:'8px'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:'12px',fontWeight:600,color:C.dim}}>{h.label}</div>
+                  <div style={{fontSize:'11px',color:C.faint}}>@ {h.zone}</div>
+                </div>
+                <div style={{background:'#0d120f',border:`1px solid ${C.green}`,color:C.green,padding:'5px 9px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',fontWeight:700,borderRadius:'2px',textAlign:'center',whiteSpace:'nowrap',lineHeight:1.3}}>
+                  TARGET MET<br/>HOLD
+                </div>
+              </div>)}
+              <div style={{marginTop:'8px',fontSize:'9px',color:C.green,lineHeight:1.5}}>
+                Cash ≥{HOARD_SELL_CEILING_PCT}% — objective met. No further selling required until regime changes or cash drops below target.
+              </div>
             </div>}
             {bh.length>0&&(()=>{
               // CASH GATE: evaluate macro regime and portfolio health BEFORE rendering any buy action.
@@ -1183,14 +1253,14 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
               if(buyGateFailed){
                 // Muted / restricted state — price target reached but liquidity is insufficient
                 return(<div style={{background:'#111318',border:'1px solid #2a3040',padding:'12px',borderRadius:'3px'}}>
-                  <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:'#7a8aaa',marginBottom:'8px',fontWeight:600}}>● Watching local floor</div>
+                  <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:'#7a8aaa',marginBottom:'8px',fontWeight:600}}>● At target · buy suspended</div>
                   {bh.map(h=><div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px',gap:'8px'}}>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:'12px',fontWeight:600,color:'#a0aac0'}}>{h.label}</div>
-                      <div style={{fontSize:'11px',color:'#5a6478'}}>@ {h.zone}</div>
+                      <div style={{fontSize:'11px',color:'#5a6478'}}>@ {h.zone} · now ${h.price.toFixed(2)}</div>
                     </div>
                     <div style={{background:'#1c2030',border:'1px solid #2a3040',color:'#c8b84a',padding:'6px 10px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',fontWeight:700,borderRadius:'2px',textAlign:'center',whiteSpace:'nowrap',lineHeight:1.3}}>
-                      TARGET REACHED<br/>LIQUIDITY RESTRICTED
+                      AT TARGET<br/>LIQUIDITY RESTRICTED
                     </div>
                   </div>)}
                   <div style={{marginTop:'10px',padding:'7px 10px',background:'#0d1018',border:'1px dashed #2a3040',borderRadius:'3px',fontSize:'9px',color:'#7a8aaa',lineHeight:1.5}}>
@@ -1215,8 +1285,12 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
           <div className="g-auto-3" style={{gap:'14px'}}>
             <div>
               <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginBottom:'6px'}}>Sell zone</div>
-              <div style={{color:C.hi,fontWeight:600,fontSize:'13px'}}>{currentLevels.sell}</div>
-              {(mode==='ROTATE'||mode==='HOARD')&&alertLevels[mode.toLowerCase()].sellAlert!=null&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500}}>Alert ${alertLevels[mode.toLowerCase()].sellAlert.toFixed(2)}</div>}
+              {hoardSellThrottled
+                ? <div style={{color:C.green,fontWeight:600,fontSize:'13px'}}>Throttled</div>
+                : <div style={{color:C.hi,fontWeight:600,fontSize:'13px'}}>{currentLevels.sell}</div>
+              }
+              {!hoardSellThrottled&&(mode==='ROTATE'||mode==='HOARD')&&alertLevels[mode.toLowerCase()].sellAlert!=null&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500}}>Alert ${alertLevels[mode.toLowerCase()].sellAlert.toFixed(2)}</div>}
+              {hoardSellThrottled&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.green,marginTop:'6px',fontWeight:500,lineHeight:1.5}}>Cash ≥{HOARD_SELL_CEILING_PCT}%<br/>Sell suspended</div>}
             </div>
             <div>
               <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginBottom:'6px'}}>Buy zone</div>
@@ -1282,8 +1356,17 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
             <div className="g-auto-2">
               <div style={{padding:'8px 10px',background:'rgba(199,62,29,0.06)',border:'1px solid rgba(199,62,29,0.2)',borderRadius:'3px'}}>
                 <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Max sell rotation</div>
-                <div style={{color:C.red,fontSize:'14px',fontWeight:600}}>{sizingGuardrail.maxSellShares} sh</div>
-                <div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>≈ £{Math.round(sizingGuardrail.maxSellGBP).toLocaleString()}</div>
+                {sizingGuardrail.sellThrottled?(
+                  <>
+                    <div style={{color:C.green,fontSize:'13px',fontWeight:700,letterSpacing:'0.04em'}}>Sell suspended</div>
+                    <div style={{fontSize:'9px',color:C.green,marginTop:'3px',lineHeight:1.4}}>Cash target met — throttle active</div>
+                  </>
+                ):(
+                  <>
+                    <div style={{color:C.red,fontSize:'14px',fontWeight:600}}>{sizingGuardrail.maxSellShares} sh</div>
+                    <div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>≈ £{Math.round(sizingGuardrail.maxSellGBP).toLocaleString()}</div>
+                  </>
+                )}
               </div>
               <div style={{padding:'8px 10px',background:sizingGuardrail.cashGateFailed?'rgba(42,48,64,0.4)':'rgba(45,134,89,0.06)',border:`1px solid ${sizingGuardrail.cashGateFailed?'#2a3040':'rgba(45,134,89,0.2)'}`,borderRadius:'3px'}}>
                 <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Max buy (cash)</div>
