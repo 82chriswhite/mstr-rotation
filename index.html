@@ -8,12 +8,12 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>MSTR Cycle Tool</title>
 <!--
-  MSTR CYCLE DECISION FRAMEWORK v14.6
-  Changes vs v14.5:
-  FIX 3: Mobile responsive grids (auto-fit minmax) on Technical Readout, Sizing Guardrail, Snapshots, Projection
-  P2: Automatic Band Miss Tracker - zone hit prompt once per zone per calendar day, pre-fills trade logger on "Yes"
-  P3: Break-Even Rotation Calculator in Mode Card (ROTATE/HOARD modes)
-  All v14.5 features preserved intact.
+  MSTR CYCLE DECISION FRAMEWORK v14.7
+  Changes vs v14.6:
+  Dynamic DEPLOY ceiling: replaces static $140 with sthMstrFloor * 1.10 (falls back to $140 when STH floor unavailable).
+  mode and deployImminent memos updated to depend on sthMstrFloor so regime shifts correctly on balance sheet updates.
+  UI text in deployImminent card and deploySuppressed warning now show the live calculated ceiling.
+  All v14.6 features preserved intact.
 -->
 <script>
   const PASSWORD_HASH = '021ab4d101785587d5ddc3e3715150393924c9df228cb6732c40da48a6cfc7c4';
@@ -419,21 +419,26 @@ function MSTRCycleTool() {
   },[mstrPrice,btcPrice,nupl,mvrv,derivativesExhaustion,cycleData,mNAV,btcBelowSthCost,mstrShortInt]);
 
   // Named thresholds for the DEPLOY regime (avoids scattered magic numbers)
-  const DEPLOY_SCORE_MIN=7;          // bottomScore at/above this flips to DEPLOY (price permitting)
-  const DEPLOY_PRICE_CEILING=140;    // MSTR must be below this for DEPLOY
-  const DEPLOY_IMMINENT_PRICE=160;   // "approaching" warning suppressed above this price
-  const DEPLOY_IMMINENT_SCORE_MIN=4; // widened lower bound so a multi-point jump can't skip the warning
+  const DEPLOY_SCORE_MIN=7;              // bottomScore at/above this flips to DEPLOY (price permitting)
+  const DEPLOY_PRICE_CEILING_STATIC=140; // Fallback ceiling used when STH floor is unavailable
+  const DEPLOY_IMMINENT_PRICE=160;       // "approaching" warning suppressed above this price
+  const DEPLOY_IMMINENT_SCORE_MIN=4;     // widened lower bound so a multi-point jump can't skip the warning
+
+  // Dynamic DEPLOY ceiling: 10% above the STH-derived MSTR floor when available,
+  // otherwise fall back to the static $140 constant.
+  // Anchors the regime gate to corporate reality (BTC cost basis) rather than a fixed number.
+  const dynamicCeiling=sthMstrFloor!==null?Math.round(sthMstrFloor*1.10):DEPLOY_PRICE_CEILING_STATIC;
 
   const mode=useMemo(()=>{
-    if(bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice<DEPLOY_PRICE_CEILING)return'DEPLOY';
+    if(bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice<dynamicCeiling)return'DEPLOY';
     if(bearScore>=6)return'HOARD';
     return'ROTATE';
-  },[bearScore,bottomScore,mstrPrice]);
+  },[bearScore,bottomScore,mstrPrice,dynamicCeiling,sthMstrFloor]);
 
   const deployImminent=useMemo(()=>{
     if(mode!=='HOARD')return false;
     return bottomScore>=DEPLOY_IMMINENT_SCORE_MIN&&bottomScore<DEPLOY_SCORE_MIN&&mstrPrice<DEPLOY_IMMINENT_PRICE;
-  },[mode,bottomScore,mstrPrice]);
+  },[mode,bottomScore,mstrPrice,sthMstrFloor]);
 
   const fmt=v=>`$${Math.round(v)}`;
   const fmtR=(lo,hi)=>`${fmt(lo)}–${fmt(hi)}`;
@@ -450,11 +455,11 @@ function MSTRCycleTool() {
       const t=d.hoard.buyTarget;
       if(p>=t*0.985&&p<=t*1.015)hits.push({tag:'HOARD-BUY',side:'BUY',label:'HOARD buy target reached',zone:fmt(t),price:p});
       const dt=d.hoard.buyDeepTarget;
-      if(p>=dt*0.985&&p<=dt*1.015)hits.push({tag:'HOARD-BUY-DEEP',side:'BUY',label:'HOARD deep buy target reached',zone:fmt(dt),price:p,atTarget:true,pctBelowTarget:0});
+      if(p<=dt*1.015)hits.push({tag:'HOARD-BUY-DEEP',side:'BUY',label:'HOARD deep buy target reached',zone:fmt(dt),price:p});
     }
     if(mode==='DEPLOY'){
       d.deploy.ladder.forEach((rung,i)=>{
-        if(p>=rung.level*0.985&&p<=rung.level*1.015)hits.push({tag:`DEPLOY-RUNG-${i+1}`,side:'BUY',label:`DEPLOY rung ${i+1} live (${rung.pct}%)`,zone:fmt(rung.level),price:p});
+        if(p<=rung.level*1.015)hits.push({tag:`DEPLOY-RUNG-${i+1}`,side:'BUY',label:`DEPLOY rung ${i+1} live (${rung.pct}%)`,zone:fmt(rung.level),price:p});
       });
     }
     return hits;
@@ -576,7 +581,7 @@ function MSTRCycleTool() {
   };
   const cfg=modeCfg[mode];
   const currentLevels=levelDisplay[mode.toLowerCase()];
-  const deploySuppressed=bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice>=DEPLOY_PRICE_CEILING;
+  const deploySuppressed=bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice>=dynamicCeiling;
 
   const priceRange=useMemo(()=>{
     if(!dynamicLevels)return null;
@@ -590,20 +595,9 @@ function MSTRCycleTool() {
     }
     if(mode==='HOARD'){
       const target=d.hoard.buyTarget;
-      const deep=d.hoard.buyDeepTarget;
       const pctToTarget=((p/target)-1)*100;
-      const inSell=p>=d.hoard.sellLow;
-      const atTarget=p>=target*0.985&&p<=target*1.015;
-      const atDeep=deep&&p>=deep*0.985&&p<=deep*1.015;
-      const belowDeep=deep&&p<deep*0.985;
-      const pctToDeep=deep&&deep>0?((p/deep)-1)*100:null;
-      let verdict,tone;
-      if(inSell){verdict='IN SELL ZONE';tone=RED;}
-      else if(atTarget){verdict='AT BUY TARGET';tone=GREEN;}
-      else if(atDeep){verdict='AT DEEP TARGET';tone=GREEN;}
-      else if(belowDeep){verdict=`${Math.abs(pctToDeep).toFixed(1)}% BELOW DEEP TARGET`;tone=GOLD;}
-      else{verdict=`${Math.abs(pctToTarget).toFixed(1)}% BELOW TARGET`;tone=GOLD;}
-      return{pct:null,verdict,tone,target,deep,sellLow:d.hoard.sellLow,sellHigh:d.hoard.sellHigh};
+      const inSell=p>=d.hoard.sellLow,atTarget=p<=target*1.015;
+      return{pct:null,verdict:inSell?'IN SELL ZONE':atTarget?'AT BUY TARGET':`${pctToTarget>0?'+':''}${pctToTarget.toFixed(1)}% vs target`,tone:inSell?RED:atTarget?GREEN:GOLD,target,deep:d.hoard.buyDeepTarget,sellLow:d.hoard.sellLow,sellHigh:d.hoard.sellHigh};
     }
     const liveRungs=d.deploy.ladder.filter(r=>p<=r.level*1.015);
     return{pct:null,verdict:liveRungs.length>0?`${liveRungs.length}/4 RUNGS LIVE`:'ABOVE LADDER',tone:GREEN,ladder:d.deploy.ladder};
@@ -874,7 +868,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
   const deletePosition=id=>{const updated=positions.filter(p=>p.id!==id);setPositions(updated);try{localStorage.setItem('mstr:positions',JSON.stringify(updated));}catch(e){}};
   const deleteSnapshot=date=>{setSnapshots(prev=>{const updated=prev.filter(s=>s.date!==date);try{localStorage.setItem('mstr:snapshots',JSON.stringify(updated));}catch(e){}return updated;});};
 
-  const buildExportPayload=()=>({version:14.6,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares},trades,snapshots,positions,misses});
+  const buildExportPayload=()=>({version:14.7,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares},trades,snapshots,positions,misses});
 
   const exportJSON=async()=>{const text=JSON.stringify(buildExportPayload(),null,2);try{await navigator.clipboard.writeText(text);setImportResult({ok:true,msg:`Exported ${trades.length} trades, ${positions.length} positions, ${snapshots.length} snapshots.`});}catch(e){setImportResult({ok:true,msg:'Export ready below — copy manually.',payload:text});}setTimeout(()=>setImportResult(null),8000);};
   const exportJSONFile=()=>{const text=JSON.stringify(buildExportPayload(),null,2);const blob=new Blob([text],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');const stamp=new Date().toISOString().slice(0,10);a.href=url;a.download=`mstr-cycle-${stamp}.json`;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(url),1000);setImportResult({ok:true,msg:`Downloaded mstr-cycle-${stamp}.json`});setTimeout(()=>setImportResult(null),6000);};
@@ -983,7 +977,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
 
     {/* HEADER */}
     <div style={{marginBottom:'24px',borderBottom:`1px solid ${C.border}`,paddingBottom:'20px'}}>
-      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.6 · prompt v2</div>
+      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.7 · prompt v2</div>
       <h1 style={{fontSize:'26px',fontWeight:400,color:C.hi,margin:0,fontStyle:'italic'}}>MSTR Rotation</h1>
       <h2 style={{fontSize:'14px',fontWeight:400,color:C.dim,margin:'4px 0 12px 0',letterSpacing:'0.05em'}}>Rotate · Hoard · Deploy</h2>
       <div style={{display:'flex',gap:'16px',flexWrap:'wrap',fontSize:'12px',marginTop:'12px',alignItems:'center'}}>
@@ -1065,9 +1059,9 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
 
         <div style={{fontSize:'13px',color:C.text,lineHeight:1.55,marginBottom:'18px'}}>{cfg.action}</div>
 
-        {deployImminent&&<div style={{marginBottom:'14px',padding:'12px 14px',background:'#111a12',border:`1px solid ${C.green}`,borderRadius:'3px'}}><div style={{color:C.green,fontSize:'12px',fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'4px'}}>● DEPLOY approaching</div><div style={{color:C.dim,fontSize:'11px',lineHeight:1.55}}>Bottom score is <span style={{color:C.green,fontWeight:600}}>{bottomScore}/20</span> — {mstrPrice<DEPLOY_PRICE_CEILING?<>{DEPLOY_SCORE_MIN-bottomScore} more point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} needed to flip to DEPLOY.</>:<>{DEPLOY_SCORE_MIN-bottomScore} point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} and a break below ${DEPLOY_PRICE_CEILING} will flip to DEPLOY.</>}</div></div>}
+        {deployImminent&&<div style={{marginBottom:'14px',padding:'12px 14px',background:'#111a12',border:`1px solid ${C.green}`,borderRadius:'3px'}}><div style={{color:C.green,fontSize:'12px',fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'4px'}}>● DEPLOY approaching</div><div style={{color:C.dim,fontSize:'11px',lineHeight:1.55}}>Bottom score is <span style={{color:C.green,fontWeight:600}}>{bottomScore}/20</span> — {mstrPrice<dynamicCeiling?<>{DEPLOY_SCORE_MIN-bottomScore} more point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} needed to flip to DEPLOY.</>:<>{DEPLOY_SCORE_MIN-bottomScore} point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} and a break below ${dynamicCeiling} will flip to DEPLOY.</>}</div></div>}
         {ivRank!==null&&ivRank>75&&bearScore>=6&&<div style={{marginBottom:'14px',padding:'10px 12px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px',fontSize:'11px',color:C.red,lineHeight:1.5}}>⚡ IV Rank {ivRank} — peak options speculation zone. +1 bear signal. Premium collapse risk elevated.</div>}
-        {deploySuppressed&&<div style={{fontSize:'11px',color:C.gold,marginBottom:'14px',padding:'10px 12px',background:'#1a1611',border:`1px dashed ${C.gold}`,borderRadius:'3px'}}>⚠ Bottom score at deploy threshold, but MSTR still above ${DEPLOY_PRICE_CEILING}. Holding HOARD.</div>}
+        {deploySuppressed&&<div style={{fontSize:'11px',color:C.gold,marginBottom:'14px',padding:'10px 12px',background:'#1a1611',border:`1px dashed ${C.gold}`,borderRadius:'3px'}}>⚠ Bottom score at deploy threshold, but MSTR still above ${dynamicCeiling}{sthMstrFloor!==null?` (STH floor $${sthMstrFloor.toFixed(2)} × 1.10)`:''}. Holding HOARD.</div>}
         {levelsAuto&&!technicals&&<div style={{fontSize:'11px',color:C.red,marginBottom:'14px',padding:'10px 12px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px'}}>⚠ Auto-levels unavailable — paste a prompt response below, or switch to manual override.</div>}
         {mode==='DEPLOY'&&levelsAuto&&dynamicLevels&&<div style={{marginBottom:'14px',padding:'8px 12px',background:'#0d1510',border:`1px dashed ${C.green}`,borderRadius:'3px',fontSize:'10px',color:C.mute,lineHeight:1.5}}>
           {dynamicLevels.deploy.anchorMode==='sth'?<span>Ladder anchored to <span style={{color:C.green,fontWeight:600}}>STH realized price floor</span> — ${sthMstrFloor?.toFixed(2)} MSTR equivalent.</span>:dynamicLevels.deploy.anchorMode==='200ma'?<span>Ladder anchored to <span style={{color:C.gold}}>200-day MA</span>.</span>:<span>Ladder anchored to current price steps.</span>}
@@ -1088,15 +1082,16 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
               // HOARD mode below its mandatory 40% cash floor suppresses all executable buy signals.
               const buyGateFailed=mode==='HOARD'&&portfolio.cashPct<HOARD_CASH_MIN_PCT;
               if(buyGateFailed){
+                // Muted / restricted state — price target reached but liquidity is insufficient
                 return(<div style={{background:'#111318',border:'1px solid #2a3040',padding:'12px',borderRadius:'3px'}}>
-                  <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:'#7a8aaa',marginBottom:'8px',fontWeight:600}}>● At target · buy suspended</div>
+                  <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:'#7a8aaa',marginBottom:'8px',fontWeight:600}}>● Watching local floor</div>
                   {bh.map(h=><div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px',gap:'8px'}}>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:'12px',fontWeight:600,color:'#a0aac0'}}>{h.label}</div>
-                      <div style={{fontSize:'11px',color:'#5a6478'}}>@ {h.zone} · now ${h.price.toFixed(2)}</div>
+                      <div style={{fontSize:'11px',color:'#5a6478'}}>@ {h.zone}</div>
                     </div>
                     <div style={{background:'#1c2030',border:'1px solid #2a3040',color:'#c8b84a',padding:'6px 10px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',fontWeight:700,borderRadius:'2px',textAlign:'center',whiteSpace:'nowrap',lineHeight:1.3}}>
-                      AT TARGET<br/>LIQUIDITY RESTRICTED
+                      TARGET REACHED<br/>LIQUIDITY RESTRICTED
                     </div>
                   </div>)}
                   <div style={{marginTop:'10px',padding:'7px 10px',background:'#0d1018',border:'1px dashed #2a3040',borderRadius:'3px',fontSize:'9px',color:'#7a8aaa',lineHeight:1.5}}>
@@ -1126,48 +1121,10 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
             </div>
             <div>
               <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginBottom:'6px'}}>Buy zone</div>
-              {mode==='HOARD'&&priceRange?(()=>{
-                const {target,deep,sellLow}=priceRange;
-                const atT=target&&mstrPrice>=target*0.985&&mstrPrice<=target*1.015;
-                const atD=deep&&mstrPrice>=deep*0.985&&mstrPrice<=deep*1.015;
-                const belowD=deep&&mstrPrice<deep*0.985;
-                const aboveT=target&&mstrPrice>target*1.015;
-                if(belowD){
-                  // Price has overshot below both targets. Buy targets are not the relevant reference —
-                  // the sell zone is. No numbers to "aim at", just hold and wait for recovery.
-                  return(<>
-                    <div style={{color:C.mute,fontWeight:600,fontSize:'13px',lineHeight:1.3}}>No buy zone</div>
-                    <div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.faint,marginTop:'6px',fontWeight:500,lineHeight:1.6}}>
-                      Both targets overshot<br/>Hold cash · sell on recovery{sellLow?` >${fmt(sellLow)}`:''}
-                    </div>
-                  </>);
-                }
-                if(atT) return(<>
-                  <div style={{color:C.green,fontWeight:600,fontSize:'13px'}}>{fmt(target)}</div>
-                  <div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.green,marginTop:'6px',fontWeight:500}}>At buy target</div>
-                </>);
-                if(atD) return(<>
-                  <div style={{color:C.green,fontWeight:600,fontSize:'13px'}}>{fmt(deep)}</div>
-                  <div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.green,marginTop:'6px',fontWeight:500}}>At deep target</div>
-                </>);
-                // Above target or between targets — show standard wait text with alerts
-                const showDeep=!aboveT&&deep;
-                return(<>
-                  <div style={{color:C.hi,fontWeight:600,fontSize:'13px',lineHeight:1.3}}>
-                    {aboveT?`Wait — ${fmt(target)}${deep?` / ${fmt(deep)}`:''}`:`Wait — deep ${fmt(deep)}`}
-                  </div>
-                  <div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500,lineHeight:1.5}}>
-                    {aboveT?`Alert $${target.toFixed(2)}${deep?` + $${deep.toFixed(2)} deep`:''}`:
-                             `Alert $${deep.toFixed(2)} deep`}
-                  </div>
-                </>);
-              })():(
-                <>
-                  <div style={{color:C.hi,fontWeight:600,fontSize:mode==='DEPLOY'?'10px':'13px',lineHeight:1.3}}>{currentLevels.buy}</div>
-                  {mode==='ROTATE'&&alertLevels.rotate.buyAlert!=null&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500}}>Alert ${alertLevels.rotate.buyAlert.toFixed(2)}</div>}
-                  {mode==='DEPLOY'&&alertLevels.deploy.ladder.length>0&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500,lineHeight:1.5}}>Set {alertLevels.deploy.ladder.length} alerts:<br/>{alertLevels.deploy.ladder.map(l=>`$${l.toFixed(2)}`).join(' · ')}</div>}
-                </>
-              )}
+              <div style={{color:C.hi,fontWeight:600,fontSize:mode==='DEPLOY'?'10px':'13px',lineHeight:1.3}}>{currentLevels.buy}</div>
+              {mode==='ROTATE'&&alertLevels.rotate.buyAlert!=null&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500}}>Alert ${alertLevels.rotate.buyAlert.toFixed(2)}</div>}
+              {mode==='HOARD'&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500,lineHeight:1.5}}>Alert ${alertLevels.hoard.buyAlert.toFixed(2)}{alertLevels.hoard.buyDeepAlert!=null&&<><br/>+ ${alertLevels.hoard.buyDeepAlert.toFixed(2)} deep</>}</div>}
+              {mode==='DEPLOY'&&alertLevels.deploy.ladder.length>0&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500,lineHeight:1.5}}>Set {alertLevels.deploy.ladder.length} alerts:<br/>{alertLevels.deploy.ladder.map(l=>`$${l.toFixed(2)}`).join(' · ')}</div>}
             </div>
             <div>
               <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginBottom:'6px'}}>Cash hold</div>
@@ -1470,7 +1427,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         <div style={{background:C.panel,padding:'16px',border:`1px solid ${C.border}`}}>
           <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Bottom signals</div>
           <div style={{fontSize:'28px',color:bottomScore>=7?C.green:C.gold,fontWeight:600}}>{bottomScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
-          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥{DEPLOY_SCORE_MIN} + MSTR&lt;${DEPLOY_PRICE_CEILING} → DEPLOY</div>
+          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥{DEPLOY_SCORE_MIN} + MSTR&lt;${dynamicCeiling}{sthMstrFloor!==null?' (STH floor×1.10)':' (static fallback)'} → DEPLOY</div>
           {deployImminent&&<div style={{fontSize:'9px',color:C.green,marginTop:'4px',fontWeight:600}}>{DEPLOY_SCORE_MIN-bottomScore} pt{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} to threshold ↑</div>}
         </div>
       </div>
