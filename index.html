@@ -8,20 +8,22 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>MSTR Cycle Tool</title>
 <!--
-  MSTR CYCLE DECISION FRAMEWORK v14.10
-  Changes vs v14.9:
-  BTC bear score tier recalibration:
-    OLD: BTC < $72,500 → +2, BTC < $60,000 → +2 (max +4 from BTC price alone)
-    NEW: BTC < $65,000 → +1, BTC < $50,000 → +2 (max +3 from BTC price alone)
-    Rationale: the $72,500 tier kept the tool in HOARD for ~100 consecutive weeks
-    through 2022–2023 even as on-chain metrics recovered. At $72k BTC the market
-    may already be in recovery — the old tier was too sticky. Backtest evidence:
-    lowering to $65k/$50k kept 180 more shares through the 2023 recovery (+£45k).
-    The max bear contribution from BTC price drops by 1 point, reducing HOARD
-    persistence in early-recovery conditions without materially changing the
-    genuine-bear signal when BTC is well below $50k.
-  Score breakdown (bearItems) updated to reflect new tiers.
-  All v14.9 features preserved intact.
+  MSTR CYCLE DECISION FRAMEWORK v14.11
+  Changes vs v14.10:
+  HOARD Recovery Readout — new panel visible only in HOARD regime, positioned immediately
+    after the cash progress bar. Articulates the current setup in three layers:
+    1. Signal type decomposition: bear signals grouped as Structural (slow-clearing),
+       Momentum (on-chain, faster), and Sentiment (fastest) — so you can see at a glance
+       whether HOARD is held by genuinely live bearishness or lagging structural signals.
+    2. Recovery momentum metrics: NUPL delta from stored trough, MVRV delta from trough,
+       BTC % above its recent low, weeks in current HOARD spell — all persisted in state.
+    3. Plain-English situation summary: one generated sentence describing the current setup
+       (e.g. "Held by 2 structural signals. Momentum recovering. Cash target met.
+       Consider reducing HOARD intensity.") — the articulation layer the tool was missing.
+  New state: nuplTrough, mvrvTrough, btcTrough (stored lowest seen during current HOARD spell),
+    hoardEntryDate (date current HOARD spell began). Auto-reset on HOARD exit.
+    Updated via useEffect watching mode transitions and via paste (trough updated if new low).
+  All v14.10 features preserved intact.
 -->
 <script>
   const PASSWORD_HASH = '021ab4d101785587d5ddc3e3715150393924c9df228cb6732c40da48a6cfc7c4';
@@ -206,6 +208,11 @@ function MSTRCycleTool() {
   const prevModeRef=useRef(null);
   const pendingModeRef=useRef(null);
   const pendingModeCountRef=useRef(0);
+  // Recovery readout state — tracks trough values and HOARD spell start for momentum metrics
+  const [nuplTrough,setNuplTrough]=useState(null);   // lowest NUPL seen in current HOARD spell
+  const [mvrvTrough,setMvrvTrough]=useState(null);   // lowest MVRV seen in current HOARD spell
+  const [btcTrough,setBtcTrough]=useState(null);     // lowest BTC price seen in current HOARD spell
+  const [hoardEntryDate,setHoardEntryDate]=useState(null); // ISO date when current HOARD spell began
 
   useEffect(()=>{
     try{const s=JSON.parse(localStorage.getItem('mstr:settings')||'null');if(s){
@@ -262,6 +269,10 @@ function MSTRCycleTool() {
       if(s.projBaseMnav!==undefined)setProjBaseMnav(s.projBaseMnav);
       if(s.projBullMnav!==undefined)setProjBullMnav(s.projBullMnav);
       if(s.projShares!==undefined)setProjShares(s.projShares);
+      if(s.nuplTrough!==undefined)setNuplTrough(s.nuplTrough);
+      if(s.mvrvTrough!==undefined)setMvrvTrough(s.mvrvTrough);
+      if(s.btcTrough!==undefined)setBtcTrough(s.btcTrough);
+      if(s.hoardEntryDate!==undefined)setHoardEntryDate(s.hoardEntryDate);
     }}catch(e){}
     try{const t=localStorage.getItem('mstr:trades');if(t)setTrades(JSON.parse(t));}catch(e){}
     try{const sn=localStorage.getItem('mstr:snapshots');if(sn)setSnapshots(JSON.parse(sn));}catch(e){}
@@ -282,7 +293,7 @@ function MSTRCycleTool() {
       etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,
       btcDominance,mstrShortInt,atmActive,ivRank,
       projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,
-      cashBufferUpdated,
+      cashBufferUpdated,nuplTrough,mvrvTrough,btcTrough,hoardEntryDate,
     }));}catch(e){}
   },[mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,
      nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,
@@ -291,7 +302,8 @@ function MSTRCycleTool() {
      parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,
      etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,
      btcDominance,mstrShortInt,atmActive,ivRank,
-     projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,cashBufferUpdated]);
+     projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,
+     cashBufferUpdated,nuplTrough,mvrvTrough,btcTrough,hoardEntryDate]);
 
   const handleHoldingsChange=v=>{setBtcHoldings(v);setCorporateBaseUpdated(new Date().toISOString().slice(0,10));};
   const handleSharesChange=v=>{setDilutedShares(v);setCorporateBaseUpdated(new Date().toISOString().slice(0,10));};
@@ -520,6 +532,33 @@ function MSTRCycleTool() {
     prevModeRef.current=mode;
   },[mode]);
 
+  // ── Trough tracking for HOARD recovery readout ──
+  // Entering HOARD: set entry date and seed troughs from current readings.
+  // Remaining in HOARD: update troughs if a worse reading arrives via paste.
+  // Leaving HOARD: clear everything so the next HOARD spell starts fresh.
+  useEffect(()=>{
+    if(mode==='HOARD'){
+      if(hoardEntryDate===null){
+        // Fresh HOARD entry
+        setHoardEntryDate(new Date().toISOString().slice(0,10));
+        setNuplTrough(nupl);
+        setMvrvTrough(mvrv);
+        setBtcTrough(btcPrice);
+      } else {
+        // Already in HOARD — update troughs if readings have worsened
+        if(nuplTrough===null||nupl<nuplTrough) setNuplTrough(nupl);
+        if(mvrvTrough===null||mvrv<mvrvTrough) setMvrvTrough(mvrv);
+        if(btcTrough===null||btcPrice<btcTrough) setBtcTrough(btcPrice);
+      }
+    } else {
+      // Exited HOARD — clear so next spell initialises fresh
+      if(hoardEntryDate!==null){
+        setHoardEntryDate(null);
+        setNuplTrough(null); setMvrvTrough(null); setBtcTrough(null);
+      }
+    }
+  },[mode,nupl,mvrv,btcPrice]);
+
   const fmt=v=>`$${Math.round(v)}`;
   const fmtR=(lo,hi)=>`${fmt(lo)}–${fmt(hi)}`;
 
@@ -723,6 +762,98 @@ function MSTRCycleTool() {
   const hoardSellThrottled=useMemo(()=>
     mode==='HOARD'&&portfolio.cashPct>=HOARD_SELL_CEILING_PCT
   ,[mode,portfolio.cashPct]);
+
+  // ── HOARD Recovery Readout ──
+  // Computes signal type decomposition and plain-English situation summary.
+  // Only meaningful in HOARD regime; returned null otherwise.
+  const hoardReadout=useMemo(()=>{
+    if(mode!=='HOARD')return null;
+
+    // ── 1. Signal decomposition by type ──
+    // Structural: slow-clearing (200MA, weekly LL) — typically last to reverse
+    // Momentum: on-chain & price level (BTC tiers, NUPL, MVRV) — clear faster
+    // Sentiment: flow/positioning signals (funding, ETF, DXY) — can flip within days
+    const structural=[];
+    const momentum=[];
+    const sentiment=[];
+
+    if(below200ma)structural.push({label:'Below 200-day MA',pts:2,clearing:'Clears when price sustains above 200MA (weeks)'});
+    if(weeklyLowerLow)structural.push({label:'Weekly lower-low',pts:1,clearing:'Clears after confirmed higher-high on weekly chart'});
+    if(btcPrice<65000)momentum.push({label:`BTC < $65k ($${btcPrice.toLocaleString()})`,pts:1,clearing:'Clears above $65k'});
+    if(btcPrice<50000)momentum.push({label:`BTC < $50k ($${btcPrice.toLocaleString()})`,pts:2,clearing:'Clears above $50k'});
+    if(nupl<0)momentum.push({label:`NUPL negative (${nupl.toFixed(1)}%)`,pts:2,clearing:'Clears when NUPL > 0 (on-chain profitability returns)'});
+    if(mvrv<1.0)momentum.push({label:`MVRV < 1.0 (${mvrv.toFixed(2)})`,pts:1,clearing:'Clears above 1.0 (holders back in profit)'});
+    if(mNAV>=1.05&&mNAV<1.20)momentum.push({label:`mNAV compressed (${mNAV.toFixed(2)}x)`,pts:1,clearing:'Clears above 1.20x'});
+    if(mNAV>2.5)momentum.push({label:`mNAV euphoria (${mNAV.toFixed(2)}x)`,pts:2,clearing:'N/A — euphoria signal'});
+    if(btcBelowSthCost)momentum.push({label:'BTC below STH cost basis',pts:1,clearing:'Clears when BTC recovers above STH realized price'});
+    if(fundingNegative)sentiment.push({label:'Funding persistently negative',pts:1,clearing:'Clears when funding normalises or turns positive'});
+    if(dxyAbove110)sentiment.push({label:'DXY above 110',pts:1,clearing:'Clears on dollar weakness'});
+    if(etfOutflowsPersistent)sentiment.push({label:'ETF outflows persistent',pts:1,clearing:'Clears when 5D flow turns positive'});
+    if(btcDominance!==null&&btcDominance<50)sentiment.push({label:`BTC dominance low (${btcDominance.toFixed(1)}%)`,pts:1,clearing:'Clears above 50%'});
+    if(atmActive&&mNAV!==null&&mNAV<1.2)sentiment.push({label:'ATM active at low premium',pts:1,clearing:'Clears when ATM pauses or mNAV > 1.2'});
+    if(ivRank!==null&&ivRank>75)sentiment.push({label:`IV Rank elevated (${ivRank})`,pts:1,clearing:'Clears when options normalise below 75'});
+
+    const structuralPts=structural.reduce((a,s)=>a+s.pts,0);
+    const momentumPts=momentum.reduce((a,s)=>a+s.pts,0);
+    const sentimentPts=sentiment.reduce((a,s)=>a+s.pts,0);
+
+    // ── 2. Recovery momentum metrics ──
+    const nuplDelta=(nuplTrough!==null&&nupl>nuplTrough)?+(nupl-nuplTrough).toFixed(1):null;
+    const mvrvDelta=(mvrvTrough!==null&&mvrv>mvrvTrough)?+(mvrv-mvrvTrough).toFixed(2):null;
+    const btcAboveTrough=(btcTrough!==null&&btcTrough>0)?+((btcPrice/btcTrough-1)*100).toFixed(1):null;
+    const hoardWeeks=hoardEntryDate?Math.floor((Date.now()-new Date(hoardEntryDate).getTime())/604800000):null;
+
+    // Recovery signal strength: how much have the momentum signals recovered?
+    const recovering=nuplDelta!==null&&nuplDelta>5;
+    const deeplyRecovering=nuplDelta!==null&&nuplDelta>15;
+    const mvrvRecovering=mvrvDelta!==null&&mvrvDelta>0.1;
+
+    // ── 3. Plain-English summary ──
+    // Generated from signal composition — what the tool sees, in words.
+    const parts=[];
+    const totalActive=structural.length+momentum.length+sentiment.length;
+    const reducibleNow=sentimentPts; // sentiment is fastest to clear
+    const reducibleSoon=momentumPts; // momentum is next
+    const locked=structuralPts;      // structural needs the most time
+
+    if(structural.length>0&&momentum.length===0&&sentiment.length===0){
+      parts.push(`HOARD driven entirely by ${structural.length} structural signal${structural.length>1?'s':''} — ${structural.map(s=>s.label).join(', ')}. These are the slowest to clear.`);
+    } else if(structural.length>0){
+      parts.push(`${structural.length} structural signal${structural.length>1?'s':''} anchoring HOARD (${structural.map(s=>s.label).join(', ')}).`);
+    }
+    if(momentum.length>0){
+      const recStr=deeplyRecovering?' Momentum signals recovering strongly (NUPL +'+nuplDelta+'pts from trough).':recovering?' Momentum signals showing early recovery (NUPL +'+nuplDelta+'pts from trough).':' Momentum signals still at or near lows.';
+      parts.push(`${momentum.length} momentum signal${momentum.length>1?'s':''} active.${recStr}`);
+    }
+    if(sentiment.length>0){
+      parts.push(`${sentiment.length} sentiment signal${sentiment.length>1?'s':''} (${sentiment.map(s=>s.label).join(', ')}) — fastest to reverse.`);
+    }
+    if(hoardSellThrottled){
+      parts.push('Cash target met — sell throttle active. No further selling required.');
+    } else {
+      parts.push(`Cash at ${portfolio.cashPct.toFixed(1)}% — ${portfolio.cashPct<HOARD_SELL_CEILING_PCT?'still building toward 40% target.':'at or above target.'}`);
+    }
+
+    // Actionable note
+    let actionNote=null;
+    if(deeplyRecovering&&structural.length<=1&&sentimentPts===0&&hoardWeeks!==null&&hoardWeeks>8){
+      actionNote={text:'Recovery momentum is strong and sentiment has cleared. Only structural signals remain. Consider reviewing whether HOARD intensity is still warranted.',tone:'amber'};
+    } else if(deeplyRecovering&&structural.length===0){
+      actionNote={text:'All structural and sentiment signals cleared. HOARD is held solely by momentum — monitor closely for ROTATE transition.',tone:'green'};
+    } else if(totalActive<=1&&hoardSellThrottled){
+      actionNote={text:'Single signal holding HOARD with cash target met. Approaching ROTATE conditions — watch for this signal to clear.',tone:'amber'};
+    } else if(!recovering&&!mvrvRecovering&&hoardWeeks!==null&&hoardWeeks<4){
+      actionNote={text:'Early in HOARD spell. Signals not yet recovering — standard posture appropriate.',tone:'neutral'};
+    } else if(locked>=4&&momentumPts===0&&sentimentPts===0){
+      actionNote={text:'Held by structural signals only — these clear slowly. Patience required; focus on cash target progress.',tone:'neutral'};
+    }
+
+    return{structural,momentum,sentiment,structuralPts,momentumPts,sentimentPts,
+           nuplDelta,mvrvDelta,btcAboveTrough,hoardWeeks,recovering,deeplyRecovering,
+           summary:parts.join(' '),actionNote};
+  },[mode,below200ma,weeklyLowerLow,btcPrice,nupl,mvrv,mNAV,btcBelowSthCost,
+     fundingNegative,dxyAbove110,etfOutflowsPersistent,btcDominance,atmActive,ivRank,
+     nuplTrough,mvrvTrough,btcTrough,hoardEntryDate,hoardSellThrottled,portfolio.cashPct]);
 
   const sizingGuardrail=useMemo(()=>{
     const currentSh=journalStats.currentShares;
@@ -995,7 +1126,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
   const deletePosition=id=>{const updated=positions.filter(p=>p.id!==id);setPositions(updated);try{localStorage.setItem('mstr:positions',JSON.stringify(updated));}catch(e){}};
   const deleteSnapshot=date=>{setSnapshots(prev=>{const updated=prev.filter(s=>s.date!==date);try{localStorage.setItem('mstr:snapshots',JSON.stringify(updated));}catch(e){}return updated;});};
 
-  const buildExportPayload=()=>({version:14.10,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,cashBufferUpdated},trades,snapshots,positions,misses,regimeLog});
+  const buildExportPayload=()=>({version:14.11,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,cashBufferUpdated},trades,snapshots,positions,misses,regimeLog});
 
   const exportJSON=async()=>{const text=JSON.stringify(buildExportPayload(),null,2);try{await navigator.clipboard.writeText(text);setImportResult({ok:true,msg:`Exported ${trades.length} trades, ${positions.length} positions, ${snapshots.length} snapshots.`});}catch(e){setImportResult({ok:true,msg:'Export ready below — copy manually.',payload:text});}setTimeout(()=>setImportResult(null),8000);};
   const exportJSONFile=()=>{const text=JSON.stringify(buildExportPayload(),null,2);const blob=new Blob([text],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');const stamp=new Date().toISOString().slice(0,10);a.href=url;a.download=`mstr-cycle-${stamp}.json`;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(url),1000);setImportResult({ok:true,msg:`Downloaded mstr-cycle-${stamp}.json`});setTimeout(()=>setImportResult(null),6000);};
@@ -1105,7 +1236,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
 
     {/* HEADER */}
     <div style={{marginBottom:'24px',borderBottom:`1px solid ${C.border}`,paddingBottom:'20px'}}>
-      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.10 · prompt v2</div>
+      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.11 · prompt v2</div>
       <h1 style={{fontSize:'26px',fontWeight:400,color:C.hi,margin:0,fontStyle:'italic'}}>MSTR Rotation</h1>
       <h2 style={{fontSize:'14px',fontWeight:400,color:C.dim,margin:'4px 0 12px 0',letterSpacing:'0.05em'}}>Rotate · Hoard · Deploy</h2>
       <div style={{display:'flex',gap:'16px',flexWrap:'wrap',fontSize:'12px',marginTop:'12px',alignItems:'center'}}>
@@ -1629,7 +1760,80 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
           <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Bottom signals</div>
           <div style={{fontSize:'28px',color:bottomScore>=7?C.green:C.gold,fontWeight:600}}>{bottomScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
           <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥{DEPLOY_SCORE_MIN} + MSTR&lt;${dynamicCeiling}{sthMstrFloor!==null?' (STH floor×1.10)':' (static fallback)'} → DEPLOY</div>
-          {deployImminent&&<div style={{fontSize:'9px',color:C.green,marginTop:'4px',fontWeight:600}}>{DEPLOY_SCORE_MIN-bottomScore} pt{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} to threshold ↑</div>}
+          {/* HOARD Recovery Readout — signal decomposition + plain-English situation summary */}
+        {mode==='HOARD'&&hoardReadout&&(()=>{
+          const R=hoardReadout;
+          const toneColor=R.actionNote?.tone==='green'?C.green:R.actionNote?.tone==='amber'?C.gold:C.dim;
+          const toneBg=R.actionNote?.tone==='green'?'#0d140f':R.actionNote?.tone==='amber'?'#12100a':'#0f0d0a';
+          const toneBorder=R.actionNote?.tone==='green'?C.green:R.actionNote?.tone==='amber'?C.gold:C.border;
+          return(
+            <div style={{marginBottom:'16px',padding:'14px 16px',background:'#0a0907',border:`1px solid ${C.border}`,borderRadius:'3px'}}>
+              <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:'14px',fontWeight:400}}>◆ HOARD situation readout</div>
+
+              {/* Signal type decomposition */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))',gap:'8px',marginBottom:'14px'}}>
+                {[
+                  {label:'Structural',items:R.structural,pts:R.structuralPts,color:'#7a5a5a',note:'Slow to clear'},
+                  {label:'Momentum',items:R.momentum,pts:R.momentumPts,color:C.gold,note:'On-chain & price'},
+                  {label:'Sentiment',items:R.sentiment,pts:R.sentimentPts,color:'#5a7a9a',note:'Fast-moving'},
+                ].map(col=>(
+                  <div key={col.label} style={{padding:'8px 10px',background:'#0f0d0a',border:`1px solid ${col.items.length>0?col.color+'44':C.border}`,borderRadius:'3px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'5px'}}>
+                      <span style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:col.items.length>0?col.color:C.faint,fontWeight:600}}>{col.label}</span>
+                      <span style={{fontSize:'13px',fontWeight:700,color:col.items.length>0?col.color:C.faint}}>{col.pts}</span>
+                    </div>
+                    <div style={{fontSize:'9px',color:C.faint,marginBottom:'5px'}}>{col.note}</div>
+                    {col.items.length===0
+                      ? <div style={{fontSize:'9px',color:C.green,fontStyle:'italic'}}>✓ Clear</div>
+                      : col.items.map((s,i)=><div key={i} style={{fontSize:'9px',color:C.dim,marginBottom:'2px',lineHeight:1.4}}>· {s.label}</div>)
+                    }
+                  </div>
+                ))}
+              </div>
+
+              {/* Recovery momentum metrics */}
+              {(R.nuplDelta!==null||R.mvrvDelta!==null||R.btcAboveTrough!==null||R.hoardWeeks!==null)&&(
+                <div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginBottom:'12px',padding:'8px 10px',background:'#0f0d0a',border:`1px solid ${C.border}`,borderRadius:'3px'}}>
+                  <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',width:'100%',marginBottom:'2px'}}>Recovery momentum</div>
+                  {R.nuplDelta!==null&&<div style={{fontSize:'11px'}}>
+                    <span style={{color:C.faint}}>NUPL </span>
+                    <span style={{color:R.nuplDelta>15?C.green:R.nuplDelta>5?C.gold:C.dim,fontWeight:600}}>+{R.nuplDelta}pts</span>
+                    <span style={{color:C.faint,fontSize:'9px'}}> from {nuplTrough?.toFixed(0)}% trough</span>
+                  </div>}
+                  {R.mvrvDelta!==null&&<div style={{fontSize:'11px'}}>
+                    <span style={{color:C.faint}}>MVRV </span>
+                    <span style={{color:R.mvrvDelta>0.2?C.green:C.gold,fontWeight:600}}>+{R.mvrvDelta}</span>
+                    <span style={{color:C.faint,fontSize:'9px'}}> from {mvrvTrough?.toFixed(2)} trough</span>
+                  </div>}
+                  {R.btcAboveTrough!==null&&<div style={{fontSize:'11px'}}>
+                    <span style={{color:C.faint}}>BTC </span>
+                    <span style={{color:R.btcAboveTrough>20?C.green:R.btcAboveTrough>10?C.gold:C.dim,fontWeight:600}}>+{R.btcAboveTrough}%</span>
+                    <span style={{color:C.faint,fontSize:'9px'}}> above ${btcTrough?.toLocaleString()} trough</span>
+                  </div>}
+                  {R.hoardWeeks!==null&&<div style={{fontSize:'11px'}}>
+                    <span style={{color:C.faint}}>In HOARD </span>
+                    <span style={{color:R.hoardWeeks>12?C.red:C.dim,fontWeight:600}}>{R.hoardWeeks}w</span>
+                    <span style={{color:C.faint,fontSize:'9px'}}> since {hoardEntryDate}</span>
+                  </div>}
+                </div>
+              )}
+
+              {/* Plain-English summary */}
+              <div style={{fontSize:'11px',color:C.dim,lineHeight:1.7,marginBottom:R.actionNote?'10px':0}}>
+                {R.summary}
+              </div>
+
+              {/* Actionable note — only shown when there's something worth flagging */}
+              {R.actionNote&&(
+                <div style={{padding:'9px 12px',background:toneBg,border:`1px solid ${toneBorder}`,borderRadius:'3px',fontSize:'11px',color:toneColor,lineHeight:1.6}}>
+                  {R.actionNote.tone==='green'?'● ':R.actionNote.tone==='amber'?'⚠ ':'○ '}{R.actionNote.text}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {deployImminent&&<div style={{fontSize:'9px',color:C.green,marginTop:'4px',fontWeight:600}}>{DEPLOY_SCORE_MIN-bottomScore} pt{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} to threshold ↑</div>}
           {bottomItems.length>0&&<button onClick={()=>setBottomBreakdownOpen(o=>!o)} style={{marginTop:'8px',background:'transparent',border:`1px solid ${C.border}`,color:C.mute,padding:'3px 8px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',textTransform:'uppercase',cursor:'pointer',borderRadius:'2px',width:'100%'}}>{bottomBreakdownOpen?'▲ hide':'▼ breakdown'}</button>}
           {bottomBreakdownOpen&&<div style={{marginTop:'8px',borderTop:`1px solid ${C.border}`,paddingTop:'8px'}}>
             {bottomItems.map((item,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'9px',color:C.dim,marginBottom:'3px',lineHeight:1.4}}>
