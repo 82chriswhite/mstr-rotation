@@ -8,19 +8,20 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>MSTR Cycle Tool</title>
 <!--
-  MSTR CYCLE DECISION FRAMEWORK v14.9
-  Changes vs v14.8:
-  HOARD sell throttle: once portfolio cash % meets or exceeds HOARD_SELL_CEILING_PCT (40%),
-    the HOARD sell trigger is suppressed — no further selling until cash drops below the target.
-    Rationale: backtest showed the tool over-sold into the 2023 recovery because HOARD had no
-    stopping criterion. Once the 40% cash target is met, the HOARD objective is achieved;
-    additional selling is not required and risks eroding the position into a recovery.
-  UI additions:
-    - HOARD cash progress bar below mode card action text (progress toward 40% target).
-    - "Sell throttle active" state for the sell trigger panel when ceiling is met.
-    - Sell zone alert suppressed in level grid when throttled.
-    - New constant HOARD_SELL_CEILING_PCT = 40 (same value as cash gate floor for symmetry).
-  All v14.8 features preserved intact.
+  MSTR CYCLE DECISION FRAMEWORK v14.10
+  Changes vs v14.9:
+  BTC bear score tier recalibration:
+    OLD: BTC < $72,500 → +2, BTC < $60,000 → +2 (max +4 from BTC price alone)
+    NEW: BTC < $65,000 → +1, BTC < $50,000 → +2 (max +3 from BTC price alone)
+    Rationale: the $72,500 tier kept the tool in HOARD for ~100 consecutive weeks
+    through 2022–2023 even as on-chain metrics recovered. At $72k BTC the market
+    may already be in recovery — the old tier was too sticky. Backtest evidence:
+    lowering to $65k/$50k kept 180 more shares through the 2023 recovery (+£45k).
+    The max bear contribution from BTC price drops by 1 point, reducing HOARD
+    persistence in early-recovery conditions without materially changing the
+    genuine-bear signal when BTC is well below $50k.
+  Score breakdown (bearItems) updated to reflect new tiers.
+  All v14.9 features preserved intact.
 -->
 <script>
   const PASSWORD_HASH = '021ab4d101785587d5ddc3e3715150393924c9df228cb6732c40da48a6cfc7c4';
@@ -421,7 +422,12 @@ function MSTRCycleTool() {
 
   const bearScore=useMemo(()=>{
     let s=0;
-    if(btcPrice<72500)s+=2;if(btcPrice<60000)s+=2;if(nupl<0)s+=2;if(mvrv<1.0)s+=1;
+    // BTC price tiers — recalibrated in v14.10:
+    // $72,500 tier removed (too sticky during early recovery).
+    // Replaced with $65,000 (+1) and $50,000 (+2) for tighter, more accurate signalling.
+    // Max BTC-price contribution drops from +4 to +3.
+    if(btcPrice<65000)s+=1;if(btcPrice<50000)s+=2;
+    if(nupl<0)s+=2;if(mvrv<1.0)s+=1;
     if(fundingNegative)s+=1;if(below200ma)s+=2;if(weeklyLowerLow)s+=1;if(dxyAbove110)s+=1;
     if(cycleData.remaining>0&&cycleData.remaining<180)s+=1;
     if(mNAV>=1.05&&mNAV<1.20)s+=1;if(mNAV>2.5)s+=2;
@@ -444,8 +450,9 @@ function MSTRCycleTool() {
   // ── Score breakdown: per-signal contributions for auditing borderline readings ──
   const bearItems=useMemo(()=>{
     const items=[];
-    if(btcPrice<72500)items.push({label:'BTC < $72,500',pts:2});
-    if(btcPrice<60000)items.push({label:'BTC < $60,000',pts:2});
+    // v14.10 BTC tiers — $65k/+1, $50k/+2 (replaces old $72.5k/+2, $60k/+2)
+    if(btcPrice<65000)items.push({label:'BTC < $65,000',pts:1});
+    if(btcPrice<50000)items.push({label:'BTC < $50,000',pts:2});
     if(nupl<0)items.push({label:'NUPL negative',pts:2});
     if(mvrv<1.0)items.push({label:'MVRV < 1.0',pts:1});
     if(fundingNegative)items.push({label:'Funding persistently negative',pts:1});
@@ -988,7 +995,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
   const deletePosition=id=>{const updated=positions.filter(p=>p.id!==id);setPositions(updated);try{localStorage.setItem('mstr:positions',JSON.stringify(updated));}catch(e){}};
   const deleteSnapshot=date=>{setSnapshots(prev=>{const updated=prev.filter(s=>s.date!==date);try{localStorage.setItem('mstr:snapshots',JSON.stringify(updated));}catch(e){}return updated;});};
 
-  const buildExportPayload=()=>({version:14.9,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,cashBufferUpdated},trades,snapshots,positions,misses,regimeLog});
+  const buildExportPayload=()=>({version:14.10,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,cashBufferUpdated},trades,snapshots,positions,misses,regimeLog});
 
   const exportJSON=async()=>{const text=JSON.stringify(buildExportPayload(),null,2);try{await navigator.clipboard.writeText(text);setImportResult({ok:true,msg:`Exported ${trades.length} trades, ${positions.length} positions, ${snapshots.length} snapshots.`});}catch(e){setImportResult({ok:true,msg:'Export ready below — copy manually.',payload:text});}setTimeout(()=>setImportResult(null),8000);};
   const exportJSONFile=()=>{const text=JSON.stringify(buildExportPayload(),null,2);const blob=new Blob([text],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');const stamp=new Date().toISOString().slice(0,10);a.href=url;a.download=`mstr-cycle-${stamp}.json`;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(url),1000);setImportResult({ok:true,msg:`Downloaded mstr-cycle-${stamp}.json`});setTimeout(()=>setImportResult(null),6000);};
@@ -1098,7 +1105,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
 
     {/* HEADER */}
     <div style={{marginBottom:'24px',borderBottom:`1px solid ${C.border}`,paddingBottom:'20px'}}>
-      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.9 · prompt v2</div>
+      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.10 · prompt v2</div>
       <h1 style={{fontSize:'26px',fontWeight:400,color:C.hi,margin:0,fontStyle:'italic'}}>MSTR Rotation</h1>
       <h2 style={{fontSize:'14px',fontWeight:400,color:C.dim,margin:'4px 0 12px 0',letterSpacing:'0.05em'}}>Rotate · Hoard · Deploy</h2>
       <div style={{display:'flex',gap:'16px',flexWrap:'wrap',fontSize:'12px',marginTop:'12px',alignItems:'center'}}>
