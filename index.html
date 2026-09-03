@@ -39,10 +39,6 @@
   .gate-btn:disabled { background:#2a2520; color:#5a5048; cursor:not-allowed; }
   .gate-err { font-size:11px; color:#c73e1d; margin-top:10px; min-height:14px; }
 
-  .zone-overlay { position:fixed; inset:0; z-index:1000; background:rgba(10,8,6,0.9); display:flex; align-items:center; justify-content:center; padding:24px; animation:zfadeIn 0.2s ease; }
-  @keyframes zfadeIn { from{opacity:0} to{opacity:1} }
-  .zone-card { background:#14100c; padding:24px; max-width:340px; width:100%; border-radius:4px; }
-
   .g-auto-4 { display:grid; grid-template-columns:repeat(auto-fit,minmax(70px,1fr)); gap:12px; }
   .g-auto-3 { display:grid; grid-template-columns:repeat(auto-fit,minmax(90px,1fr)); gap:8px; }
   .g-auto-2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
@@ -81,28 +77,6 @@ function Gate({ onUnlock }) {
   );
 }
 
-function ZoneHitPrompt({ hit, onActed, onMissed, onDismiss }) {
-  if (!hit) return null;
-  const isSell = hit.side === 'SELL';
-  const bc = isSell ? '#c73e1d' : '#2d8659';
-  return (
-    <div className="zone-overlay">
-      <div className="zone-card" style={{border:`2px solid ${bc}`}}>
-        <div style={{fontSize:'9px',color:'#8a7a65',letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:'8px'}}>Zone detected · {new Date().toLocaleTimeString().slice(0,5)}</div>
-        <div style={{fontSize:'16px',color:bc,fontWeight:700,letterSpacing:'0.05em',marginBottom:'6px'}}>{isSell?'▲ SELL ZONE HIT':'▼ BUY ZONE HIT'}</div>
-        <div style={{fontSize:'13px',color:'#d4c8b8',marginBottom:'4px'}}>{hit.label}</div>
-        <div style={{fontSize:'12px',color:'#a89580',marginBottom:'20px'}}>Zone: {hit.zone} · Current: ${hit.price.toFixed(2)}</div>
-        <div style={{fontSize:'13px',color:'#d4c8b8',marginBottom:'16px',fontStyle:'italic'}}>Did you act on this zone?</div>
-        <div style={{display:'flex',gap:'10px'}}>
-          <button onClick={onActed} style={{flex:1,background:bc,color:'#fff',border:'none',padding:'11px',fontFamily:'Georgia,serif',fontSize:'11px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:700,borderRadius:'2px'}}>Yes — log trade</button>
-          <button onClick={onMissed} style={{flex:1,background:'transparent',color:'#a89580',border:'1px solid #2a2520',padding:'11px',fontFamily:'Georgia,serif',fontSize:'11px',letterSpacing:'0.12em',textTransform:'uppercase',cursor:'pointer',borderRadius:'2px'}}>No — missed</button>
-        </div>
-        <button onClick={onDismiss} style={{width:'100%',marginTop:'8px',background:'transparent',color:'#5a5048',border:'none',padding:'6px',fontFamily:'Georgia,serif',fontSize:'10px',letterSpacing:'0.1em',cursor:'pointer'}}>dismiss without logging</button>
-      </div>
-    </div>
-  );
-}
-
 function MSTRCycleTool() {
   const [mstrPrice,setMstrPrice]=useState(134.73);
   const [btcPrice,setBtcPrice]=useState(80866);
@@ -125,9 +99,8 @@ function MSTRCycleTool() {
   const [dxyAbove110,setDxyAbove110]=useState(false);
   const [btcHoldings,setBtcHoldings]=useState(840447);
   const [dilutedShares,setDilutedShares]=useState(384.2);
-  const [corporateBaseUpdated,setCorporateBaseUpdated]=useState(null);
-  const [startingShares,setStartingShares]=useState(553);
-  const [cashBuffer,setCashBuffer]=useState(0);
+  const [startingShares,setStartingShares]=useState(474);
+  const [cashBuffer,setCashBuffer]=useState(7964.20);
   const [gbpUsd,setGbpUsd]=useState(1.31);
   const [parsedMnav,setParsedMnav]=useState(1.02);
   const [totalDebt,setTotalDebt]=useState(6700);
@@ -146,54 +119,19 @@ function MSTRCycleTool() {
   const [dataTimestamp,setDataTimestamp]=useState(null);
   const [confidence,setConfidence]=useState('HIGH');
   const [staleFields,setStaleFields]=useState(null);
-  const [levelsAuto,setLevelsAuto]=useState(true);
-  const [manualSellLow,setManualSellLow]=useState(192);
-  const [manualSellHigh,setManualSellHigh]=useState(200);
-  const [manualBuyLow,setManualBuyLow]=useState(170);
-  const [manualBuyHigh,setManualBuyHigh]=useState(180);
   const [trades,setTrades]=useState([]);
-  const [snapshots,setSnapshots]=useState([]);
-  const [misses,setMisses]=useState([]);
-  const [zoneHitKeys,setZoneHitKeys]=useState({});
-  const [zoneHitPrompt,setZoneHitPrompt]=useState(null);
-  const [aggressionStyle,setAggressionStyle]=useState('moderate');
-  const [positions,setPositions]=useState([]);
-  const [positionForm,setPositionForm]=useState({shares:'',entryPrice:'',stop:'',target:'',tag:'MANUAL',notes:''});
-  const [exitPrices,setExitPrices]=useState({});
   const [view,setView]=useState('dashboard');
   
-  // Standalone DCA / Unpaired Logger State
+  // Unpaired Trade Logger State
   const [tradeType,setTradeType]=useState('SELL');
-  const [tradeShares,setTradeShares]=useState('79');
+  const [tradeShares,setTradeShares]=useState('');
   const [tradePriceMode,setTradePriceMode]=useState('GBP_TOTAL');
-  const [tradePriceInput,setTradePriceInput]=useState('7964.20');
+  const [tradePriceInput,setTradePriceInput]=useState('');
   const [tradeDate,setTradeDate]=useState(new Date().toISOString().slice(0,10));
-  const [tradeFees,setTradeFees]=useState('');
   const [autoSyncCash,setAutoSyncCash]=useState(true);
 
   const [promptCopied,setPromptCopied]=useState(false);
-  const [promptSelectMsg,setPromptSelectMsg]=useState('');
   const promptTextareaRef=useRef(null);
-  const [beqSellShares,setBeqSellShares]=useState('');
-  const [beqSellPrice,setBeqSellPrice]=useState('');
-  const [projBearBtc,setProjBearBtc]=useState(45000);
-  const [projBaseBtc,setProjBaseBtc]=useState(120000);
-  const [projBullBtc,setProjBullBtc]=useState(250000);
-  const [projBearMnav,setProjBearMnav]=useState(1.0);
-  const [projBaseMnav,setProjBaseMnav]=useState(1.6);
-  const [projBullMnav,setProjBullMnav]=useState(2.2);
-  const [projShares,setProjShares]=useState(null);
-  const [importText,setImportText]=useState('');
-  const [importResult,setImportResult]=useState(null);
-  const [cashBufferUpdated,setCashBufferUpdated]=useState(null);
-  const [regimeLog,setRegimeLog]=useState([]);
-  const [bearBreakdownOpen,setBearBreakdownOpen]=useState(false);
-  const [bottomBreakdownOpen,setBottomBreakdownOpen]=useState(false);
-  const prevModeRef=useRef(null);
-  const [nuplTrough,setNuplTrough]=useState(null);
-  const [mvrvTrough,setMvrvTrough]=useState(null);
-  const [btcTrough,setBtcTrough]=useState(null);
-  const [hoardEntryDate,setHoardEntryDate]=useState(null);
 
   useEffect(()=>{
     try{const s=JSON.parse(localStorage.getItem('mstr:settings')||'null');if(s){
@@ -201,12 +139,6 @@ function MSTRCycleTool() {
       if(s.btcPrice!==undefined)setBtcPrice(s.btcPrice);
       if(s.ma200!==undefined)setMa200(s.ma200);
       if(s.lastUpdated!==undefined)setLastUpdated(s.lastUpdated);
-      if(s.high20!==undefined)setHigh20(s.high20);
-      if(s.low20!==undefined)setLow20(s.low20);
-      if(s.high50!==undefined)setHigh50(s.high50);
-      if(s.low50!==undefined)setLow50(s.low50);
-      if(s.low200!==undefined)setLow200(s.low200);
-      if(s.atr14!==undefined)setAtr14(s.atr14);
       if(s.nupl!==undefined)setNupl(s.nupl);
       if(s.mvrv!==undefined)setMvrv(s.mvrv);
       if(s.fundingNegative!==undefined)setFundingNegative(s.fundingNegative);
@@ -216,16 +148,9 @@ function MSTRCycleTool() {
       if(s.dxyAbove110!==undefined)setDxyAbove110(s.dxyAbove110);
       if(s.btcHoldings!==undefined)setBtcHoldings(s.btcHoldings);
       if(s.dilutedShares!==undefined)setDilutedShares(s.dilutedShares);
-      if(s.corporateBaseUpdated!==undefined)setCorporateBaseUpdated(s.corporateBaseUpdated);
       if(s.startingShares!==undefined)setStartingShares(s.startingShares);
       if(s.cashBuffer!==undefined)setCashBuffer(s.cashBuffer);
       if(s.gbpUsd!==undefined)setGbpUsd(s.gbpUsd);
-      if(s.levelsAuto!==undefined)setLevelsAuto(s.levelsAuto);
-      if(s.manualSellLow!==undefined)setManualSellLow(s.manualSellLow);
-      if(s.manualSellHigh!==undefined)setManualSellHigh(s.manualSellHigh);
-      if(s.manualBuyLow!==undefined)setManualBuyLow(s.manualBuyLow);
-      if(s.manualBuyHigh!==undefined)setManualBuyHigh(s.manualBuyHigh);
-      if(s.aggressionStyle!==undefined)setAggressionStyle(s.aggressionStyle);
       if(s.parsedMnav!==undefined)setParsedMnav(s.parsedMnav);
       if(s.totalDebt!==undefined)setTotalDebt(s.totalDebt);
       if(s.preferredNotional!==undefined)setPreferredNotional(s.preferredNotional);
@@ -236,47 +161,29 @@ function MSTRCycleTool() {
       if(s.etfOutflowsPersistent!==undefined)setEtfOutflowsPersistent(s.etfOutflowsPersistent);
       if(s.mnavCompressed!==undefined)setMnavCompressed(s.mnavCompressed);
       if(s.mnavEuphoric!==undefined)setMnavEuphoric(s.mnavEuphoric);
-      if(s.dataTimestamp!==undefined)setDataTimestamp(s.dataTimestamp);
-      if(s.confidence!==undefined)setConfidence(s.confidence);
-      if(s.staleFields!==undefined)setStaleFields(s.staleFields);
       if(s.btcDominance!==undefined)setBtcDominance(s.btcDominance);
       if(s.mstrShortInt!==undefined)setMstrShortInt(s.mstrShortInt);
       if(s.atmActive!==undefined)setAtmActive(s.atmActive);
       if(s.ivRank!==undefined)setIvRank(s.ivRank);
     }}catch(e){}
     try{const t=localStorage.getItem('mstr:trades');if(t)setTrades(JSON.parse(t));}catch(e){}
-    try{const sn=localStorage.getItem('mstr:snapshots');if(sn)setSnapshots(JSON.parse(sn));}catch(e){}
-    try{const pos=localStorage.getItem('mstr:positions');if(pos)setPositions(JSON.parse(pos));}catch(e){}
-    try{const ms=localStorage.getItem('mstr:misses');if(ms)setMisses(JSON.parse(ms));}catch(e){}
-    try{const zk=localStorage.getItem('mstr:zoneHitKeys');if(zk)setZoneHitKeys(JSON.parse(zk));}catch(e){}
-    try{const rl=localStorage.getItem('mstr:regimeLog');if(rl)setRegimeLog(JSON.parse(rl));}catch(e){}
   },[]);
 
   useEffect(()=>{
     try{localStorage.setItem('mstr:settings',JSON.stringify({
       mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,
       nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,
-      btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,
-      levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,
+      btcHoldings,dilutedShares,startingShares,cashBuffer,gbpUsd,
       parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,
       etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,
-      btcDominance,mstrShortInt,atmActive,ivRank,
-      projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,
-      cashBufferUpdated,nuplTrough,mvrvTrough,btcTrough,hoardEntryDate,
+      btcDominance,mstrShortInt,atmActive,ivRank
     }));}catch(e){}
   },[mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,
      nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,
-     btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,
-     levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,
+     btcHoldings,dilutedShares,startingShares,cashBuffer,gbpUsd,
      parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,
      etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,
-     btcDominance,mstrShortInt,atmActive,ivRank,
-     projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,
-     cashBufferUpdated,nuplTrough,mvrvTrough,btcTrough,hoardEntryDate]);
-
-  const handleHoldingsChange=v=>{setBtcHoldings(v);setCorporateBaseUpdated(new Date().toISOString().slice(0,10));};
-  const handleSharesChange=v=>{setDilutedShares(v);setCorporateBaseUpdated(new Date().toISOString().slice(0,10));};
-  const handleCashBufferChange=v=>{setCashBuffer(v);setCashBufferUpdated(new Date().toISOString());};
+     btcDominance,mstrShortInt,atmActive,ivRank]);
 
   const btcPerShare=useMemo(()=>btcHoldings/(dilutedShares*1_000_000),[btcHoldings,dilutedShares]);
   const fairValue=useMemo(()=>btcPerShare*btcPrice,[btcPerShare,btcPrice]);
@@ -284,21 +191,13 @@ function MSTRCycleTool() {
   const mNAV=useMemo(()=>parsedMnav!==null?parsedMnav:legacyMnav,[parsedMnav,legacyMnav]);
 
   const journalStats=useMemo(()=>{
-    let currentShares=startingShares, totalCash=0, totalBuyCash=0;
+    let currentShares=startingShares;
     const sorted=[...trades].sort((a,b)=>a.date.localeCompare(b.date));
     sorted.forEach(t=>{
-      const gross=t.shares*t.price;
-      if(t.type==='SELL'){
-        currentShares-=t.shares;
-        totalCash+=gross-(t.fees||0);
-      } else {
-        currentShares+=t.shares;
-        totalCash-=gross+(t.fees||0);
-        totalBuyCash+=gross+(t.fees||0);
-      }
+      if(t.type==='SELL') currentShares-=t.shares;
+      else currentShares+=t.shares;
     });
-    const weightedAvgCost=currentShares>0&&totalBuyCash>0?totalBuyCash/currentShares:null;
-    return{currentShares,totalCash,sharesDelta:currentShares-startingShares,sharesPct:startingShares>0?((currentShares-startingShares)/startingShares)*100:0,tradeCount:trades.length,weightedAvgCost,totalBuyCash};
+    return {currentShares, tradeCount:trades.length};
   },[trades,startingShares]);
 
   const portfolio=useMemo(()=>{
@@ -330,13 +229,11 @@ function MSTRCycleTool() {
     return s;
   },[mstrPrice,btcPrice,nupl,mvrv,derivativesExhaustion,mNAV,btcBelowSthCost,mstrShortInt]);
 
-  const DEPLOY_SCORE_MIN=7;
-  const DEPLOY_PRICE_CEILING_STATIC=140;
   const sthMstrFloor=useMemo(()=>sthRealizedPrice&&btcPerShare>0?btcPerShare*sthRealizedPrice:null,[sthRealizedPrice,btcPerShare]);
-  const dynamicCeiling=sthMstrFloor!==null?Math.round(sthMstrFloor*1.10):DEPLOY_PRICE_CEILING_STATIC;
+  const dynamicCeiling=sthMstrFloor!==null?Math.round(sthMstrFloor*1.10):140;
 
   const mode=useMemo(()=>{
-    if(bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice<dynamicCeiling)return'DEPLOY';
+    if(bottomScore>=7&&mstrPrice<dynamicCeiling)return'DEPLOY';
     if(bearScore>=6)return'HOARD';
     return'ROTATE';
   },[bearScore,bottomScore,mstrPrice,dynamicCeiling]);
@@ -372,8 +269,7 @@ function MSTRCycleTool() {
       shares: sharesNum,
       price: parseFloat(finalPriceUsd.toFixed(2)),
       priceGbp: parseFloat((totalProceedsGbp / sharesNum).toFixed(2)),
-      totalGbp: parseFloat(totalProceedsGbp.toFixed(2)),
-      fees: parseFloat(tradeFees)||0
+      totalGbp: parseFloat(totalProceedsGbp.toFixed(2))
     };
 
     const updated=[...trades, trade];
@@ -390,7 +286,6 @@ function MSTRCycleTool() {
 
     setTradeShares('');
     setTradePriceInput('');
-    setTradeFees('');
   };
 
   const deleteTrade=id=>{
@@ -399,7 +294,7 @@ function MSTRCycleTool() {
     try{localStorage.setItem('mstr:trades',JSON.stringify(updated));}catch(e){}
   };
 
-  const claudePrompt=`You are providing market data for a live trading decision tool. Accuracy and freshness are critical — stale, hallucinated, or guessed data causes catastrophic trading losses. Follow all four phases below exactly.
+  const fullClaudePrompt = `You are providing market data for a live trading decision tool. Accuracy and freshness are critical — stale, hallucinated, or guessed data causes catastrophic trading losses. Follow all four phases below exactly.
 
 PHASE 1 — STATE THE CURRENT TIME
 Write one line: "Current time: YYYY-MM-DD HH:MM UTC" before executing any searches.
@@ -407,12 +302,37 @@ Write one line: "Current time: YYYY-MM-DD HH:MM UTC" before executing any search
 PHASE 2 — SEARCH WITH FRESHNESS DISCIPLINE
 Search for each item. Prioritize real-time ticker feeds, options chains, and active balance sheet metrics over articles/commentary.
 
+Sources to use:
+- MSTR price + technicals: finance.yahoo.com, barchart.com, stockanalysis.com (live quote)
+- MSTR 200MA + 20/50d highs/lows + ATR(14): barchart.com technicals page for MSTR
+- BTC spot: coingecko.com, coindesk.com
+- NUPL, MVRV, STH realized price: bitbo.io, lookintobitcoin.com, glassnode, cryptoquant
+- BTC perp funding + OI: coinglass.com
+- ETF 5-day flows: farside.co.uk/btc (authoritative)
+- DXY: tradingview.com, marketwatch.com
+- BTC dominance: coingecko.com (dominance tab) or tradingview BTC.D
+- MSTR short interest: finviz.com MSTR page, or S3 Partners / Ortex (if available)
+- MSTR IV rank: barchart.com options page for MSTR (30-day IV rank)
+- Strategy ATM status: most recent S-3 or prospectus supplement on SEC EDGAR for MSTR
+- Strategy 8-K BTC holdings: latest 8-K on SEC EDGAR
+- Strategy 10-Q (debt, preferred, cash): latest 10-Q on SEC EDGAR
+- mNAV secondary reference (read-only audit only): bitcoinquant.co/company/MSTR or VanEck tracker
+
+Freshness rules:
+- Do NOT use articles from days or weeks ago for live stock or spot asset prices.
+- If your top result is old, search again with "today", "current", or the actual date.
+- Do NOT extrapolate from training data memory. If you cannot cite a source under 7 days old, mark the field as estimated.
+- Weekend/holiday closes: note explicitly in STALE_FIELDS.
+- On weekends/market holidays, MSTR_PRICE and all MSTR technicals are the last session's close — list them in STALE_FIELDS. BTC_PRICE and on-chain metrics trade 24/7 and remain live; do NOT mark these stale solely because markets are closed.
+
 PHASE 3 — MANDATORY BALANCE SHEET MATH AUDIT
 CRITICAL: Do NOT extract the mNAV ratio from summary tracking sheets or external trackers. Calculate from scratch:
+
 Step 3.1: Market Cap = MSTR_PRICE x (DILUTED_SHARES x 1,000,000)
 Step 3.2: EV = Market Cap + (TOTAL_DEBT x 1,000,000) + (PREFERRED_NOTIONAL x 1,000,000) - (CASH_POSITION x 1,000,000)
 Step 3.3: BTC_NAV = BTC_HOLDINGS x BTC_PRICE
 Step 3.4: Final mNAV = EV / BTC_NAV
+Step 3.5 (audit): Cross-check vs bitcoinquant.co. If divergence >0.15x, recheck inputs. Do NOT override Step 3.4.
 
 PHASE 4 — RETURN DATA BLOCK
 Return exactly as shown. One key per line. No commentary inside block. Plain numbers only.
@@ -454,31 +374,80 @@ ETF_OUTFLOWS_PERSISTENT: ON or OFF
 MNAV_COMPRESSED: ON or OFF
 MNAV_EUPHORIC: ON or OFF
 ATM_ACTIVE: ON or OFF
----END DATA---`;
+---END DATA---
+
+FIELD RULES:
+- DILUTED_SHARES: in millions (e.g. 280.0).
+- TOTAL_DEBT, PREFERRED_NOTIONAL, CASH_POSITION: in millions USD.
+- BELOW_200MA: ON if MSTR closing price is below 200-day SMA.
+- WEEKLY_LL: ON if MSTR weekly lower-low after lower-high confirmed.
+- SHORTING and EXHAUSTION are mutually exclusive.
+- SHORTING: ON only if BTC perp funding persistently aggressively negative across Binance, Bybit, OKX.
+- EXHAUSTION: ON only if funding flat/neutral AND aggregate OI collapsed to multi-month lows.
+- ETF_OUTFLOWS_PERSISTENT: ON if ETF_FLOWS_5D more negative than -500.
+- MNAV_COMPRESSED: ON if MNAV < 1.05. MNAV_EUPHORIC: ON if MNAV > 2.5. Both cannot be ON.
+- ATM_ACTIVE: ON if Strategy filed prospectus supplement under active ATM program within 30 days.
+- MSTR_IV_RANK: 0=cheapest, 100=most expensive. IV>75 adds +1 bear signal.
+
+CONFIDENCE: HIGH = all live under 24h, no estimates. MEDIUM = 1-2 estimated/stale. LOW = 3+ or major field stale/uncertain.
+- HARD CAP: if ANY of MSTR_PRICE, BTC_PRICE, BTC_HOLDINGS, DILUTED_SHARES is estimated or older than 24h, CONFIDENCE cannot exceed LOW regardless of the count above — these four drive the tool's regime/mode and the mNAV recompute.
+
+POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit math. D) Confidence justification. E) Other notes.`;
 
   const copyPrompt=async()=>{
-    try{await navigator.clipboard.writeText(claudePrompt);setPromptCopied(true);setTimeout(()=>setPromptCopied(false),2500);}catch(e){}
+    try{
+      await navigator.clipboard.writeText(fullClaudePrompt);
+      setPromptCopied(true);
+      setTimeout(()=>setPromptCopied(false),2500);
+    }catch(e){}
   };
 
   const applyPaste=()=>{
     if(!pasteText.trim())return;
     let text=pasteText.replace(/---BEGIN DATA---/g,'').replace(/---END DATA---/g,'').replace(/```[a-z]*\n?/gi,'').replace(/```/g,'');
     const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);
+    const safeNum=(raw,{allowNegative=false,allowZero=false}={})=>{const n=Number(raw);if(!Number.isFinite(n))return null;if(!allowNegative&&n<0)return null;if(!allowZero&&n===0)return null;return n;};
+
     for(const line of lines){
       const m=line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/);if(!m)continue;
       const key=m[1].toUpperCase(),val=m[2].trim(),cv=val.replace(/[$,%]/g,'');
       const bv=/^on$|^true$|^yes$|^1$/i.test(val);
-      const n=Number(cv);
       switch(key){
-        case'MSTR_PRICE':if(n>0)setMstrPrice(n);break;
-        case'BTC_PRICE':if(n>0)setBtcPrice(n);break;
-        case'MSTR_200MA':if(n>0)setMa200(n);break;
-        case'MNAV':if(n>0)setParsedMnav(n);break;
-        case'NUPL':if(!isNaN(n))setNupl(n);break;
-        case'MVRV':if(n>0)setMvrv(n);break;
+        case'MSTR_PRICE':{const n=safeNum(cv);if(n!==null)setMstrPrice(n);break;}
+        case'MSTR_200MA':{const n=safeNum(cv);if(n!==null)setMa200(n);break;}
+        case'MSTR_20D_HIGH':{const n=safeNum(cv);if(n!==null)setHigh20(n);break;}
+        case'MSTR_20D_LOW':{const n=safeNum(cv);if(n!==null)setLow20(n);break;}
+        case'MSTR_50D_HIGH':{const n=safeNum(cv);if(n!==null)setHigh50(n);break;}
+        case'MSTR_50D_LOW':{const n=safeNum(cv);if(n!==null)setLow50(n);break;}
+        case'MSTR_200D_LOW':{const n=safeNum(cv);if(n!==null)setLow200(n);break;}
+        case'MSTR_ATR14':{const n=safeNum(cv);if(n!==null)setAtr14(n);break;}
+        case'BTC_PRICE':{const n=safeNum(cv);if(n!==null)setBtcPrice(n);break;}
+        case'NUPL':{const n=safeNum(cv,{allowNegative:true,allowZero:true});if(n!==null)setNupl(n);break;}
+        case'MVRV':{const n=safeNum(cv);if(n!==null)setMvrv(n);break;}
+        case'BTC_HOLDINGS':{const n=safeNum(cv);if(n!==null)setBtcHoldings(n);break;}
+        case'DILUTED_SHARES':{const n=safeNum(cv);if(n!==null){const sh=n>10000?n/1_000_000:n;setDilutedShares(sh);}break;}
         case'BELOW_200MA':setBelow200ma(bv);break;
-        case'EXHAUSTION':setDerivativesExhaustion(bv);break;
-        case'MNAV_COMPRESSED':setMnavCompressed(bv);break;
+        case'WEEKLY_LL':setWeeklyLowerLow(bv);break;
+        case'SHORTING':setFundingNegative(bv);if(bv)setDerivativesExhaustion(false);break;
+        case'EXHAUSTION':setDerivativesExhaustion(bv);if(bv)setFundingNegative(false);break;
+        case'DXY_ABOVE_110':setDxyAbove110(bv);break;
+        case'STH_REALIZED_PRICE':{const n=safeNum(cv);if(n!==null)setSthRealizedPrice(n);break;}
+        case'ETF_FLOWS_5D':{const n=safeNum(cv,{allowNegative:true,allowZero:true});if(n!==null)setEtfFlows5d(n);break;}
+        case'TOTAL_DEBT':{const n=safeNum(cv,{allowZero:true});if(n!==null)setTotalDebt(n);break;}
+        case'PREFERRED_NOTIONAL':{const n=safeNum(cv,{allowZero:true});if(n!==null)setPreferredNotional(n);break;}
+        case'CASH_POSITION':{const n=safeNum(cv,{allowZero:true});if(n!==null)setCashPosition(n);break;}
+        case'MNAV':{const n=safeNum(cv);if(n!==null)setParsedMnav(n);break;}
+        case'BTC_BELOW_STH_COST':setBtcBelowSthCost(bv);break;
+        case'ETF_OUTFLOWS_PERSISTENT':setEtfOutflowsPersistent(bv);break;
+        case'MNAV_COMPRESSED':setMnavCompressed(bv);if(bv)setMnavEuphoric(false);break;
+        case'MNAV_EUPHORIC':setMnavEuphoric(bv);if(bv)setMnavCompressed(false);break;
+        case'BTC_DOMINANCE':{const n=safeNum(cv);if(n!==null)setBtcDominance(n);break;}
+        case'MSTR_SHORT_INT':{const n=safeNum(cv);if(n!==null)setMstrShortInt(n);break;}
+        case'MSTR_IV_RANK':{const n=safeNum(cv,{allowZero:true});if(n!==null)setIvRank(n);break;}
+        case'ATM_ACTIVE':setAtmActive(bv);break;
+        case'DATA_TIMESTAMP':if(val)setDataTimestamp(val);break;
+        case'CONFIDENCE':if(val)setConfidence(val.toUpperCase());break;
+        case'STALE_FIELDS':setStaleFields(val);break;
       }
     }
     setLastUpdated(new Date().toISOString());
@@ -497,7 +466,7 @@ ATM_ACTIVE: ON or OFF
 
     {/* HEADER */}
     <div style={{marginBottom:'24px',borderBottom:`1px solid ${C.border}`,paddingBottom:'20px'}}>
-      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.12 · DCA Accumulator</div>
+      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.12 · Full Engine</div>
       <h1 style={{fontSize:'26px',fontWeight:400,color:C.hi,margin:0,fontStyle:'italic'}}>MSTR Accumulator</h1>
       <div style={{display:'flex',gap:'16px',flexWrap:'wrap',fontSize:'12px',marginTop:'12px',alignItems:'center'}}>
         <div><span style={{color:C.mute}}>BTC </span><span style={{color:C.gold}}>${btcPrice.toLocaleString()}</span></div>
@@ -556,7 +525,22 @@ ATM_ACTIVE: ON or OFF
         <div style={{background:C.panel,padding:'16px',border:`1px solid ${C.border}`}}>
           <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Bottom signals</div>
           <div style={{fontSize:'28px',color:bottomScore>=7?C.green:C.gold,fontWeight:600}}>{bottomScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
-          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥{DEPLOY_SCORE_MIN} → DEPLOY REGIME</div>
+          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥7 → DEPLOY REGIME</div>
+        </div>
+      </div>
+
+      {/* ACTIVE SIGNALS LIST */}
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
+        <SH>◆ Active On-Chain & Technical Indicators</SH>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',fontSize:'11px'}}>
+          <div style={{color:below200ma?C.red:C.dim}}>• MSTR Below 200MA: <strong>{below200ma?'ON':'OFF'}</strong></div>
+          <div style={{color:derivativesExhaustion?C.green:C.dim}}>• Derivatives Exhaustion: <strong>{derivativesExhaustion?'ON':'OFF'}</strong></div>
+          <div style={{color:mnavCompressed?C.green:C.dim}}>• mNAV Compressed (&lt;1.05x): <strong>{mnavCompressed?'ON':'OFF'}</strong></div>
+          <div style={{color:btcBelowSthCost?C.green:C.dim}}>• BTC Below STH Cost: <strong>{btcBelowSthCost?'ON':'OFF'}</strong></div>
+          <div style={{color:C.gold}}>• NUPL: <strong>{nupl}%</strong></div>
+          <div style={{color:C.gold}}>• MVRV: <strong>{mvrv}</strong></div>
+          <div style={{color:C.gold}}>• STH Realized: <strong>${sthRealizedPrice.toLocaleString()}</strong></div>
+          <div style={{color:C.gold}}>• ETF 5D Flow: <strong>${etfFlows5d}M</strong></div>
         </div>
       </div>
 
@@ -564,7 +548,7 @@ ATM_ACTIVE: ON or OFF
       <div style={{background:C.panel,border:`1px solid ${C.gold}`,padding:'20px',marginBottom:'24px'}}>
         <SH>◆ Refresh Indicators via LLM</SH>
         <div style={{fontSize:'11px',color:C.dim,marginBottom:'12px'}}>Copy the prompt below into Claude/Gemini with web search enabled to obtain real-time metrics.</div>
-        <textarea ref={promptTextareaRef} readOnly value={claudePrompt} style={{width:'100%',height:'120px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'10px',fontFamily:'Menlo,monospace',fontSize:'10px',resize:'vertical',lineHeight:1.4}}/>
+        <textarea ref={promptTextareaRef} readOnly value={fullClaudePrompt} style={{width:'100%',height:'120px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'10px',fontFamily:'Menlo,monospace',fontSize:'10px',resize:'vertical',lineHeight:1.4}}/>
         <button onClick={copyPrompt} style={{width:'100%',marginTop:'8px',background:promptCopied?C.green:C.gold,color:C.bg,border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>{promptCopied?'✓ Prompt Copied':'◆ Copy Prompt'}</button>
         
         <div style={{marginTop:'16px',paddingTop:'16px',borderTop:`1px solid ${C.border}`}}>
@@ -578,8 +562,8 @@ ATM_ACTIVE: ON or OFF
     {/* TRADE TRACKER TAB */}
     {view==='journal'&&(<>
       <div style={{background:C.panel,border:`1px solid ${C.gold}`,padding:'20px',marginBottom:'20px'}}>
-        <SH>◆ Log Unpaired Trade</SH>
-        <div style={{fontSize:'11px',color:C.dim,marginBottom:'14px'}}>Log executions directly without requiring open swing positions.</div>
+        <SH>◆ Log Trade Execution</SH>
+        <div style={{fontSize:'11px',color:C.dim,marginBottom:'14px'}}>Log executions directly to adjust share counts and update cash buffers.</div>
         
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'12px'}}>
           <div style={{display:'flex',gap:'8px',gridColumn:'span 2'}}>
@@ -619,7 +603,7 @@ ATM_ACTIVE: ON or OFF
 
           <div style={{gridColumn:'span 2',display:'flex',alignItems:'center',gap:'8px',marginTop:'4px'}}>
             <input type="checkbox" id="syncCash" checked={autoSyncCash} onChange={e=>setAutoSyncCash(e.target.checked)}/>
-            <label htmlFor="syncCash" style={{fontSize:'11px',color:C.dim,cursor:'pointer'}}>Auto-update Cash Buffer (SIPP balance) with trade proceeds/cost</label>
+            <label htmlFor="syncCash" style={{fontSize:'11px',color:C.dim,cursor:'pointer'}}>Auto-update Cash Buffer with trade proceeds/cost</label>
           </div>
         </div>
 
