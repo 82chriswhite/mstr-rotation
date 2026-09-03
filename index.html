@@ -126,7 +126,7 @@ function MSTRCycleTool() {
   const [btcHoldings,setBtcHoldings]=useState(840447);
   const [dilutedShares,setDilutedShares]=useState(384.2);
   const [corporateBaseUpdated,setCorporateBaseUpdated]=useState(null);
-  const [startingShares,setStartingShares]=useState(1000);
+  const [startingShares,setStartingShares]=useState(553);
   const [cashBuffer,setCashBuffer]=useState(0);
   const [gbpUsd,setGbpUsd]=useState(1.31);
   const [parsedMnav,setParsedMnav]=useState(1.02);
@@ -162,10 +162,10 @@ function MSTRCycleTool() {
   const [exitPrices,setExitPrices]=useState({});
   const [view,setView]=useState('dashboard');
   
-  // DCA / Unpaired Trade State
+  // Standalone DCA / Unpaired Logger State
   const [tradeType,setTradeType]=useState('SELL');
   const [tradeShares,setTradeShares]=useState('79');
-  const [tradePriceMode,setTradePriceMode]=useState('GBP_TOTAL'); // 'USD', 'GBP_PRICE', 'GBP_TOTAL', 'GBX'
+  const [tradePriceMode,setTradePriceMode]=useState('GBP_TOTAL');
   const [tradePriceInput,setTradePriceInput]=useState('7964.20');
   const [tradeDate,setTradeDate]=useState(new Date().toISOString().slice(0,10));
   const [tradeFees,setTradeFees]=useState('');
@@ -201,23 +201,78 @@ function MSTRCycleTool() {
       if(s.btcPrice!==undefined)setBtcPrice(s.btcPrice);
       if(s.ma200!==undefined)setMa200(s.ma200);
       if(s.lastUpdated!==undefined)setLastUpdated(s.lastUpdated);
-      if(s.gbpUsd!==undefined)setGbpUsd(s.gbpUsd);
+      if(s.high20!==undefined)setHigh20(s.high20);
+      if(s.low20!==undefined)setLow20(s.low20);
+      if(s.high50!==undefined)setHigh50(s.high50);
+      if(s.low50!==undefined)setLow50(s.low50);
+      if(s.low200!==undefined)setLow200(s.low200);
+      if(s.atr14!==undefined)setAtr14(s.atr14);
+      if(s.nupl!==undefined)setNupl(s.nupl);
+      if(s.mvrv!==undefined)setMvrv(s.mvrv);
+      if(s.fundingNegative!==undefined)setFundingNegative(s.fundingNegative);
+      if(s.derivativesExhaustion!==undefined)setDerivativesExhaustion(s.derivativesExhaustion);
+      if(s.below200ma!==undefined)setBelow200ma(s.below200ma);
+      if(s.weeklyLowerLow!==undefined)setWeeklyLowerLow(s.weeklyLowerLow);
+      if(s.dxyAbove110!==undefined)setDxyAbove110(s.dxyAbove110);
+      if(s.btcHoldings!==undefined)setBtcHoldings(s.btcHoldings);
+      if(s.dilutedShares!==undefined)setDilutedShares(s.dilutedShares);
+      if(s.corporateBaseUpdated!==undefined)setCorporateBaseUpdated(s.corporateBaseUpdated);
       if(s.startingShares!==undefined)setStartingShares(s.startingShares);
       if(s.cashBuffer!==undefined)setCashBuffer(s.cashBuffer);
+      if(s.gbpUsd!==undefined)setGbpUsd(s.gbpUsd);
+      if(s.levelsAuto!==undefined)setLevelsAuto(s.levelsAuto);
+      if(s.manualSellLow!==undefined)setManualSellLow(s.manualSellLow);
+      if(s.manualSellHigh!==undefined)setManualSellHigh(s.manualSellHigh);
+      if(s.manualBuyLow!==undefined)setManualBuyLow(s.manualBuyLow);
+      if(s.manualBuyHigh!==undefined)setManualBuyHigh(s.manualBuyHigh);
+      if(s.aggressionStyle!==undefined)setAggressionStyle(s.aggressionStyle);
+      if(s.parsedMnav!==undefined)setParsedMnav(s.parsedMnav);
+      if(s.totalDebt!==undefined)setTotalDebt(s.totalDebt);
+      if(s.preferredNotional!==undefined)setPreferredNotional(s.preferredNotional);
+      if(s.cashPosition!==undefined)setCashPosition(s.cashPosition);
+      if(s.sthRealizedPrice!==undefined)setSthRealizedPrice(s.sthRealizedPrice);
+      if(s.btcBelowSthCost!==undefined)setBtcBelowSthCost(s.btcBelowSthCost);
+      if(s.etfFlows5d!==undefined)setEtfFlows5d(s.etfFlows5d);
+      if(s.etfOutflowsPersistent!==undefined)setEtfOutflowsPersistent(s.etfOutflowsPersistent);
+      if(s.mnavCompressed!==undefined)setMnavCompressed(s.mnavCompressed);
+      if(s.mnavEuphoric!==undefined)setMnavEuphoric(s.mnavEuphoric);
+      if(s.dataTimestamp!==undefined)setDataTimestamp(s.dataTimestamp);
+      if(s.confidence!==undefined)setConfidence(s.confidence);
+      if(s.staleFields!==undefined)setStaleFields(s.staleFields);
+      if(s.btcDominance!==undefined)setBtcDominance(s.btcDominance);
+      if(s.mstrShortInt!==undefined)setMstrShortInt(s.mstrShortInt);
+      if(s.atmActive!==undefined)setAtmActive(s.atmActive);
+      if(s.ivRank!==undefined)setIvRank(s.ivRank);
     }}catch(e){}
     try{const t=localStorage.getItem('mstr:trades');if(t)setTrades(JSON.parse(t));}catch(e){}
     try{const sn=localStorage.getItem('mstr:snapshots');if(sn)setSnapshots(JSON.parse(sn));}catch(e){}
     try{const pos=localStorage.getItem('mstr:positions');if(pos)setPositions(JSON.parse(pos));}catch(e){}
+    try{const ms=localStorage.getItem('mstr:misses');if(ms)setMisses(JSON.parse(ms));}catch(e){}
+    try{const zk=localStorage.getItem('mstr:zoneHitKeys');if(zk)setZoneHitKeys(JSON.parse(zk));}catch(e){}
+    try{const rl=localStorage.getItem('mstr:regimeLog');if(rl)setRegimeLog(JSON.parse(rl));}catch(e){}
   },[]);
 
   useEffect(()=>{
     try{localStorage.setItem('mstr:settings',JSON.stringify({
-      mstrPrice,btcPrice,ma200,lastUpdated,startingShares,cashBuffer,gbpUsd,
-      parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,
+      mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,
       nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,
-      btcHoldings,dilutedShares,cashBufferUpdated
+      btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,
+      levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,
+      parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,
+      etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,
+      btcDominance,mstrShortInt,atmActive,ivRank,
+      projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,
+      cashBufferUpdated,nuplTrough,mvrvTrough,btcTrough,hoardEntryDate,
     }));}catch(e){}
-  },[mstrPrice,btcPrice,ma200,lastUpdated,startingShares,cashBuffer,gbpUsd]);
+  },[mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,
+     nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,
+     btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,
+     levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,
+     parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,
+     etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,
+     btcDominance,mstrShortInt,atmActive,ivRank,
+     projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,
+     cashBufferUpdated,nuplTrough,mvrvTrough,btcTrough,hoardEntryDate]);
 
   const handleHoldingsChange=v=>{setBtcHoldings(v);setCorporateBaseUpdated(new Date().toISOString().slice(0,10));};
   const handleSharesChange=v=>{setDilutedShares(v);setCorporateBaseUpdated(new Date().toISOString().slice(0,10));};
@@ -229,25 +284,22 @@ function MSTRCycleTool() {
   const mNAV=useMemo(()=>parsedMnav!==null?parsedMnav:legacyMnav,[parsedMnav,legacyMnav]);
 
   const journalStats=useMemo(()=>{
-    let currentShares=startingShares, totalCashGbp=cashBuffer, totalBuyCashUsd=0, totalBuyShares=0;
+    let currentShares=startingShares, totalCash=0, totalBuyCash=0;
     const sorted=[...trades].sort((a,b)=>a.date.localeCompare(b.date));
-    
     sorted.forEach(t=>{
-      const grossUsd=t.shares*t.price;
-      const grossGbp=grossUsd/gbpUsd;
+      const gross=t.shares*t.price;
       if(t.type==='SELL'){
         currentShares-=t.shares;
-      }else{
+        totalCash+=gross-(t.fees||0);
+      } else {
         currentShares+=t.shares;
-        totalBuyCashUsd+=grossUsd+(t.fees||0);
-        totalBuyShares+=t.shares;
+        totalCash-=gross+(t.fees||0);
+        totalBuyCash+=gross+(t.fees||0);
       }
     });
-
-    const sharesDelta=currentShares-startingShares;
-    const weightedAvgCost=totalBuyShares>0?totalBuyCashUsd/totalBuyShares:null;
-    return {currentShares, sharesDelta, weightedAvgCost, tradeCount:trades.length};
-  },[trades,startingShares,gbpUsd,cashBuffer]);
+    const weightedAvgCost=currentShares>0&&totalBuyCash>0?totalBuyCash/currentShares:null;
+    return{currentShares,totalCash,sharesDelta:currentShares-startingShares,sharesPct:startingShares>0?((currentShares-startingShares)/startingShares)*100:0,tradeCount:trades.length,weightedAvgCost,totalBuyCash};
+  },[trades,startingShares]);
 
   const portfolio=useMemo(()=>{
     const positionUSD=journalStats.currentShares*mstrPrice;
@@ -257,7 +309,38 @@ function MSTRCycleTool() {
     return{positionUSD,positionGBP,totalGBP,cashPct,positionPct:100-cashPct};
   },[journalStats.currentShares,mstrPrice,gbpUsd,cashBuffer]);
 
-  // Direct logging of buys and sells without positions
+  const bearScore=useMemo(()=>{
+    let s=0;
+    if(btcPrice<65000)s+=1;if(btcPrice<50000)s+=2;
+    if(nupl<0)s+=2;if(mvrv<1.0)s+=1;
+    if(fundingNegative)s+=1;if(below200ma)s+=2;if(weeklyLowerLow)s+=1;if(dxyAbove110)s+=1;
+    if(mNAV>=1.05&&mNAV<1.20)s+=1;if(mNAV>2.5)s+=2;
+    if(btcBelowSthCost)s+=1;if(etfOutflowsPersistent)s+=1;
+    if(btcDominance!==null&&btcDominance<50)s+=1;
+    if(atmActive&&mNAV!==null&&mNAV<1.2)s+=1;
+    if(ivRank!==null&&ivRank>75)s+=1;
+    return s;
+  },[btcPrice,nupl,mvrv,fundingNegative,below200ma,weeklyLowerLow,dxyAbove110,mNAV,btcBelowSthCost,etfOutflowsPersistent,btcDominance,atmActive,ivRank]);
+
+  const bottomScore=useMemo(()=>{
+    let s=0;
+    if(mstrPrice<120)s+=2;if(mstrPrice<90)s+=2;if(btcPrice<55000)s+=2;if(btcPrice<45000)s+=2;
+    if(nupl<-25)s+=3;if(mvrv<0.8)s+=3;if(derivativesExhaustion)s+=2;
+    if(mNAV>0&&mNAV<1.05)s+=2;if(btcBelowSthCost)s+=1;if(mstrShortInt!==null&&mstrShortInt>20)s+=1;
+    return s;
+  },[mstrPrice,btcPrice,nupl,mvrv,derivativesExhaustion,mNAV,btcBelowSthCost,mstrShortInt]);
+
+  const DEPLOY_SCORE_MIN=7;
+  const DEPLOY_PRICE_CEILING_STATIC=140;
+  const sthMstrFloor=useMemo(()=>sthRealizedPrice&&btcPerShare>0?btcPerShare*sthRealizedPrice:null,[sthRealizedPrice,btcPerShare]);
+  const dynamicCeiling=sthMstrFloor!==null?Math.round(sthMstrFloor*1.10):DEPLOY_PRICE_CEILING_STATIC;
+
+  const mode=useMemo(()=>{
+    if(bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice<dynamicCeiling)return'DEPLOY';
+    if(bearScore>=6)return'HOARD';
+    return'ROTATE';
+  },[bearScore,bottomScore,mstrPrice,dynamicCeiling]);
+
   const addTrade=()=>{
     const sharesNum = parseFloat(tradeShares);
     const inputNum = parseFloat(tradePriceInput);
@@ -297,14 +380,11 @@ function MSTRCycleTool() {
     setTrades(updated);
     try{localStorage.setItem('mstr:trades',JSON.stringify(updated));}catch(e){}
 
-    // Auto update cash buffer if enabled
     if(autoSyncCash) {
       if(tradeType === 'SELL') {
-        const newCash = cashBuffer + totalProceedsGbp;
-        setCashBuffer(parseFloat(newCash.toFixed(2)));
+        setCashBuffer(parseFloat((cashBuffer + totalProceedsGbp).toFixed(2)));
       } else {
-        const newCash = Math.max(0, cashBuffer - totalProceedsGbp);
-        setCashBuffer(parseFloat(newCash.toFixed(2)));
+        setCashBuffer(parseFloat(Math.max(0, cashBuffer - totalProceedsGbp).toFixed(2)));
       }
     }
 
@@ -317,6 +397,92 @@ function MSTRCycleTool() {
     const updated=trades.filter(t=>t.id!==id);
     setTrades(updated);
     try{localStorage.setItem('mstr:trades',JSON.stringify(updated));}catch(e){}
+  };
+
+  const claudePrompt=`You are providing market data for a live trading decision tool. Accuracy and freshness are critical — stale, hallucinated, or guessed data causes catastrophic trading losses. Follow all four phases below exactly.
+
+PHASE 1 — STATE THE CURRENT TIME
+Write one line: "Current time: YYYY-MM-DD HH:MM UTC" before executing any searches.
+
+PHASE 2 — SEARCH WITH FRESHNESS DISCIPLINE
+Search for each item. Prioritize real-time ticker feeds, options chains, and active balance sheet metrics over articles/commentary.
+
+PHASE 3 — MANDATORY BALANCE SHEET MATH AUDIT
+CRITICAL: Do NOT extract the mNAV ratio from summary tracking sheets or external trackers. Calculate from scratch:
+Step 3.1: Market Cap = MSTR_PRICE x (DILUTED_SHARES x 1,000,000)
+Step 3.2: EV = Market Cap + (TOTAL_DEBT x 1,000,000) + (PREFERRED_NOTIONAL x 1,000,000) - (CASH_POSITION x 1,000,000)
+Step 3.3: BTC_NAV = BTC_HOLDINGS x BTC_PRICE
+Step 3.4: Final mNAV = EV / BTC_NAV
+
+PHASE 4 — RETURN DATA BLOCK
+Return exactly as shown. One key per line. No commentary inside block. Plain numbers only.
+
+---BEGIN DATA---
+DATA_TIMESTAMP: [ISO-8601 UTC datetime]
+CONFIDENCE: [HIGH or MEDIUM or LOW]
+STALE_FIELDS: [comma-separated field names or NONE]
+MSTR_PRICE: [number]
+MSTR_200MA: [number]
+MSTR_20D_HIGH: [number]
+MSTR_20D_LOW: [number]
+MSTR_50D_HIGH: [number]
+MSTR_50D_LOW: [number]
+MSTR_200D_LOW: [number]
+MSTR_ATR14: [number]
+BTC_PRICE: [number]
+NUPL: [number, percent]
+MVRV: [number, one decimal]
+STH_REALIZED_PRICE: [number]
+ETF_FLOWS_5D: [signed integer millions USD]
+BTC_HOLDINGS: [integer]
+DILUTED_SHARES: [number in millions]
+TOTAL_DEBT: [number in millions USD]
+PREFERRED_NOTIONAL: [number in millions USD]
+CASH_POSITION: [number in millions USD]
+MNAV: [number, two decimals, MUST MATCH STEP 3.4]
+DXY: [number, one decimal]
+BTC_DOMINANCE: [number, one decimal]
+MSTR_SHORT_INT: [number, one decimal, percent of float]
+MSTR_IV_RANK: [integer 0-100]
+BELOW_200MA: ON or OFF
+WEEKLY_LL: ON or OFF
+SHORTING: ON or OFF
+EXHAUSTION: ON or OFF
+DXY_ABOVE_110: ON or OFF
+BTC_BELOW_STH_COST: ON or OFF
+ETF_OUTFLOWS_PERSISTENT: ON or OFF
+MNAV_COMPRESSED: ON or OFF
+MNAV_EUPHORIC: ON or OFF
+ATM_ACTIVE: ON or OFF
+---END DATA---`;
+
+  const copyPrompt=async()=>{
+    try{await navigator.clipboard.writeText(claudePrompt);setPromptCopied(true);setTimeout(()=>setPromptCopied(false),2500);}catch(e){}
+  };
+
+  const applyPaste=()=>{
+    if(!pasteText.trim())return;
+    let text=pasteText.replace(/---BEGIN DATA---/g,'').replace(/---END DATA---/g,'').replace(/```[a-z]*\n?/gi,'').replace(/```/g,'');
+    const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);
+    for(const line of lines){
+      const m=line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/);if(!m)continue;
+      const key=m[1].toUpperCase(),val=m[2].trim(),cv=val.replace(/[$,%]/g,'');
+      const bv=/^on$|^true$|^yes$|^1$/i.test(val);
+      const n=Number(cv);
+      switch(key){
+        case'MSTR_PRICE':if(n>0)setMstrPrice(n);break;
+        case'BTC_PRICE':if(n>0)setBtcPrice(n);break;
+        case'MSTR_200MA':if(n>0)setMa200(n);break;
+        case'MNAV':if(n>0)setParsedMnav(n);break;
+        case'NUPL':if(!isNaN(n))setNupl(n);break;
+        case'MVRV':if(n>0)setMvrv(n);break;
+        case'BELOW_200MA':setBelow200ma(bv);break;
+        case'EXHAUSTION':setDerivativesExhaustion(bv);break;
+        case'MNAV_COMPRESSED':setMnavCompressed(bv);break;
+      }
+    }
+    setLastUpdated(new Date().toISOString());
+    setPasteText('');
   };
 
   const C={bg:'#0a0806',panel:'#14100c',border:'#2a2520',text:'#d4c8b8',dim:'#a89580',mute:'#8a7a65',faint:'#5a5048',gold:'#d4a017',red:'#c73e1d',green:'#2d8659',hi:'#e8dcc8'};
@@ -341,37 +507,84 @@ function MSTRCycleTool() {
       </div>
     </div>
 
-    {/* NAV */}
+    {/* NAVIGATION */}
     <div style={{marginBottom:'20px'}}>
       <div style={{display:'flex',gap:'6px',marginBottom:'6px'}}>
         <NB id="dashboard" label="Dashboard"/><NB id="journal" label={`Trade Tracker (${trades.length})`}/><NB id="backup" label="Backup"/>
       </div>
     </div>
 
-    {view==='dashboard'&&(
+    {/* DASHBOARD TAB */}
+    {view==='dashboard'&&(<>
+      {/* MODE REGIME CARD */}
+      <div style={{background:mode==='HOARD'?'#1a0f0d':mode==='DEPLOY'?'#0f1a13':'#1a1611',border:`1px solid ${mode==='HOARD'?C.red:mode==='DEPLOY'?C.green:C.gold}`,padding:'20px',marginBottom:'20px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'12px'}}>
+          <div>
+            <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute}}>Active Regime</div>
+            <div style={{fontSize:'22px',color:mode==='HOARD'?C.red:mode==='DEPLOY'?C.green:C.gold,fontWeight:600}}>{mode === 'HOARD' ? 'CASH HOARD' : mode === 'DEPLOY' ? 'DEPLOY CASH' : 'NORMAL ROTATION'}</div>
+          </div>
+          <div style={{textAlign:'right'}}>
+            <div style={{fontSize:'9px',color:C.mute}}>MSTR PRICE</div>
+            <div style={{fontSize:'24px',color:C.hi,fontWeight:600}}>${mstrPrice.toFixed(2)}</div>
+          </div>
+        </div>
+        <div style={{fontSize:'12px',color:C.dim,lineHeight:1.5}}>
+          {mode==='HOARD'?'Sell at technical resistance. Build cash buffer. Do not execute buy backs until signals improve.':mode==='DEPLOY'?'All-in cash deployment zone. Accumulate weakness.':'Rotate positions around resistance/support bands.'}
+        </div>
+      </div>
+
+      {/* PORTFOLIO OVERVIEW */}
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
         <SH>◆ Portfolio Overview</SH>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',fontSize:'12px',marginBottom:'16px'}}>
           <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Current Share Count</div><div style={{color:C.hi,fontSize:'24px',fontWeight:600}}>{journalStats.currentShares.toFixed(0)} sh</div></div>
           <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Total Portfolio Value</div><div style={{color:C.gold,fontSize:'24px',fontWeight:600}}>£{portfolio.totalGBP.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>
         </div>
-        <div style={{paddingTop:'12px',borderTop:`1px solid ${C.border}`,display:'flex',justifyContent:'space-between'}}>
+        <div style={{paddingTop:'12px',borderTop:`1px solid ${C.border}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <span style={{color:C.mute,fontSize:'11px'}}>SIPP Cash Buffer</span>
           <span style={{color:C.hi,fontSize:'14px',fontWeight:600}}>£{cashBuffer.toLocaleString()} ({portfolio.cashPct.toFixed(1)}%)</span>
         </div>
       </div>
-    )}
 
-    {/* JOURNAL / UNPAIRED TRACKER TAB */}
+      {/* REGIME SIGNALS SCORES */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'24px'}}>
+        <div style={{background:C.panel,padding:'16px',border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Bear signals</div>
+          <div style={{fontSize:'28px',color:bearScore>=6?C.red:C.gold,fontWeight:600}}>{bearScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
+          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥6 → HOARD REGIME</div>
+        </div>
+        <div style={{background:C.panel,padding:'16px',border:`1px solid ${C.border}`}}>
+          <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Bottom signals</div>
+          <div style={{fontSize:'28px',color:bottomScore>=7?C.green:C.gold,fontWeight:600}}>{bottomScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
+          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥{DEPLOY_SCORE_MIN} → DEPLOY REGIME</div>
+        </div>
+      </div>
+
+      {/* PROMPT UPDATER */}
+      <div style={{background:C.panel,border:`1px solid ${C.gold}`,padding:'20px',marginBottom:'24px'}}>
+        <SH>◆ Refresh Indicators via LLM</SH>
+        <div style={{fontSize:'11px',color:C.dim,marginBottom:'12px'}}>Copy the prompt below into Claude/Gemini with web search enabled to obtain real-time metrics.</div>
+        <textarea ref={promptTextareaRef} readOnly value={claudePrompt} style={{width:'100%',height:'120px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'10px',fontFamily:'Menlo,monospace',fontSize:'10px',resize:'vertical',lineHeight:1.4}}/>
+        <button onClick={copyPrompt} style={{width:'100%',marginTop:'8px',background:promptCopied?C.green:C.gold,color:C.bg,border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>{promptCopied?'✓ Prompt Copied':'◆ Copy Prompt'}</button>
+        
+        <div style={{marginTop:'16px',paddingTop:'16px',borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:'10px',color:C.mute,textTransform:'uppercase',marginBottom:'6px'}}>Paste LLM Response Block</div>
+          <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} placeholder={'---BEGIN DATA---\nMSTR_PRICE: 134.73\nBTC_PRICE: 80866\n...\n---END DATA---'} style={{width:'100%',height:'100px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'10px',fontFamily:'Menlo,monospace',fontSize:'10px'}}/>
+          <button onClick={applyPaste} style={{width:'100%',marginTop:'8px',background:C.green,color:'#fff',border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>◆ Apply Live Data</button>
+        </div>
+      </div>
+    </>)}
+
+    {/* TRADE TRACKER TAB */}
     {view==='journal'&&(<>
       <div style={{background:C.panel,border:`1px solid ${C.gold}`,padding:'20px',marginBottom:'20px'}}>
-        <SH>◆ Log Buy or Sell Trade</SH>
-        <div style={{fontSize:'11px',color:C.dim,marginBottom:'14px',lineHeight:1.6}}>Log any execution directly without requiring paired positions.</div>
+        <SH>◆ Log Unpaired Trade</SH>
+        <div style={{fontSize:'11px',color:C.dim,marginBottom:'14px'}}>Log executions directly without requiring open swing positions.</div>
         
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'12px'}}>
           <div style={{display:'flex',gap:'8px',gridColumn:'span 2'}}>
-            <button onClick={()=>setTradeType('SELL')} style={{flex:1,background:tradeType==='SELL'?C.red:'transparent',color:tradeType==='SELL'?'#fff':C.dim,border:`1px solid ${tradeType==='SELL'?C.red:C.border}`,padding:'10px',fontFamily:S,fontSize:'12px',letterSpacing:'0.1em',cursor:'pointer',fontWeight:700}}>SELL</button>
-            <button onClick={()=>setTradeType('BUY')} style={{flex:1,background:tradeType==='BUY'?C.green:'transparent',color:tradeType==='BUY'?'#fff':C.dim,border:`1px solid ${tradeType==='BUY'?C.green:C.border}`,padding:'10px',fontFamily:S,fontSize:'12px',letterSpacing:'0.1em',cursor:'pointer',fontWeight:700}}>BUY</button>
+            <button onClick={()=>setTradeType('SELL')} style={{flex:1,background:tradeType==='SELL'?C.red:'transparent',color:tradeType==='SELL'?'#fff':C.dim,border:`1px solid ${tradeType==='SELL'?C.red:C.border}`,padding:'10px',fontFamily:S,fontSize:'12px',cursor:'pointer',fontWeight:700}}>SELL</button>
+            <button onClick={()=>setTradeType('BUY')} style={{flex:1,background:tradeType==='BUY'?C.green:'transparent',color:tradeType==='BUY'?'#fff':C.dim,border:`1px solid ${tradeType==='BUY'?C.green:C.border}`,padding:'10px',fontFamily:S,fontSize:'12px',cursor:'pointer',fontWeight:700}}>BUY</button>
           </div>
 
           <div>
@@ -385,7 +598,7 @@ function MSTRCycleTool() {
           </div>
 
           <div style={{gridColumn:'span 2'}}>
-            <div style={{color:C.mute,fontSize:'10px',marginBottom:'4px'}}>Price / Proceeds Format</div>
+            <div style={{color:C.mute,fontSize:'10px',marginBottom:'4px'}}>Format</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'6px'}}>
               <button onClick={()=>setTradePriceMode('GBP_TOTAL')} style={{background:tradePriceMode==='GBP_TOTAL'?C.gold:'transparent',color:tradePriceMode==='GBP_TOTAL'?'#000':C.dim,border:`1px solid ${C.border}`,padding:'6px',fontSize:'10px'}}>Total £</button>
               <button onClick={()=>setTradePriceMode('GBX')} style={{background:tradePriceMode==='GBX'?C.gold:'transparent',color:tradePriceMode==='GBX'?'#000':C.dim,border:`1px solid ${C.border}`,padding:'6px',fontSize:'10px'}}>Pence (GBX)</button>
@@ -396,12 +609,12 @@ function MSTRCycleTool() {
 
           <div style={{gridColumn:'span 2'}}>
             <div style={{color:C.mute,fontSize:'10px',marginBottom:'4px'}}>
-              {tradePriceMode==='GBP_TOTAL' && 'Total Net Proceeds / Cost (£ GBP)'}
+              {tradePriceMode==='GBP_TOTAL' && 'Total Proceeds / Cost (£ GBP)'}
               {tradePriceMode==='GBX' && 'Price Per Share in Pence (e.g. 10190.95)'}
               {tradePriceMode==='GBP_PRICE' && 'Price Per Share in Pounds (£ GBP)'}
               {tradePriceMode==='USD' && 'Price Per Share in USD ($)'}
             </div>
-            <input type="number" step="any" placeholder="Enter amount..." value={tradePriceInput} onChange={e=>setTradePriceInput(e.target.value)} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.gold,padding:'10px',fontFamily:S,fontSize:'14px',fontWeight:600}}/>
+            <input type="number" step="any" placeholder="Enter value..." value={tradePriceInput} onChange={e=>setTradePriceInput(e.target.value)} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.gold,padding:'10px',fontFamily:S,fontSize:'14px',fontWeight:600}}/>
           </div>
 
           <div style={{gridColumn:'span 2',display:'flex',alignItems:'center',gap:'8px',marginTop:'4px'}}>
@@ -410,7 +623,7 @@ function MSTRCycleTool() {
           </div>
         </div>
 
-        <button onClick={addTrade} style={{width:'100%',background:C.gold,color:C.bg,border:'none',padding:'12px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:700}}>+ Log {tradeType} Trade</button>
+        <button onClick={addTrade} style={{width:'100%',background:C.gold,color:C.bg,border:'none',padding:'12px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:700}}>+ Log {tradeType} Execution</button>
       </div>
 
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px'}}>
@@ -431,10 +644,10 @@ function MSTRCycleTool() {
     {/* BACKUP TAB */}
     {view==='backup'&&(
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px'}}>
-        <SH>◆ Backup Data</SH>
+        <SH>◆ Backup Framework State</SH>
         <button onClick={()=>{
           const blob=new Blob([JSON.stringify({trades,startingShares,cashBuffer,gbpUsd},null,2)],{type:'application/json'});
-          const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mstr-dca-backup.json'; a.click();
+          const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mstr-cycle-backup.json'; a.click();
         }} style={{width:'100%',background:C.gold,color:'#000',border:'none',padding:'12px',fontFamily:S,fontSize:'11px',fontWeight:700,cursor:'pointer'}}>EXPORT JSON BACKUP</button>
       </div>
     )}
