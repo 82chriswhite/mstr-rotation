@@ -6,7 +6,11 @@
 <meta name="theme-color" content="#0a0806" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<title>MSTR Cycle & DCA Tool</title>
+<title>MSTR Cycle Tool</title>
+<!--
+  MSTR CYCLE DECISION FRAMEWORK v14.12
+  Restored Full Engine + Agile Multi-Currency DCA / Unpaired Logger
+-->
 <script>
   const PASSWORD_HASH = '021ab4d101785587d5ddc3e3715150393924c9df228cb6732c40da48a6cfc7c4';
   const AUTH_REQUIRED = true;
@@ -38,6 +42,10 @@
   .gate-btn { width:100%; background:#d4a017; color:#000; border:none; padding:11px; font-size:11px; letter-spacing:0.18em; text-transform:uppercase; cursor:pointer; border-radius:2px; font-weight:600; }
   .gate-btn:disabled { background:#2a2520; color:#5a5048; cursor:not-allowed; }
   .gate-err { font-size:11px; color:#c73e1d; margin-top:10px; min-height:14px; }
+
+  .zone-overlay { position:fixed; inset:0; z-index:1000; background:rgba(10,8,6,0.9); display:flex; align-items:center; justify-content:center; padding:24px; animation:zfadeIn 0.2s ease; }
+  @keyframes zfadeIn { from{opacity:0} to{opacity:1} }
+  .zone-card { background:#14100c; padding:24px; max-width:340px; width:100%; border-radius:4px; }
 
   .g-auto-4 { display:grid; grid-template-columns:repeat(auto-fit,minmax(70px,1fr)); gap:12px; }
   .g-auto-3 { display:grid; grid-template-columns:repeat(auto-fit,minmax(90px,1fr)); gap:8px; }
@@ -77,6 +85,28 @@ function Gate({ onUnlock }) {
   );
 }
 
+function ZoneHitPrompt({ hit, onActed, onMissed, onDismiss }) {
+  if (!hit) return null;
+  const isSell = hit.side === 'SELL';
+  const bc = isSell ? '#c73e1d' : '#2d8659';
+  return (
+    <div className="zone-overlay">
+      <div className="zone-card" style={{border:`2px solid ${bc}`}}>
+        <div style={{fontSize:'9px',color:'#8a7a65',letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:'8px'}}>Zone detected · {new Date().toLocaleTimeString().slice(0,5)}</div>
+        <div style={{fontSize:'16px',color:bc,fontWeight:700,letterSpacing:'0.05em',marginBottom:'6px'}}>{isSell?'▲ SELL ZONE HIT':'▼ BUY ZONE HIT'}</div>
+        <div style={{fontSize:'13px',color:'#d4c8b8',marginBottom:'4px'}}>{hit.label}</div>
+        <div style={{fontSize:'12px',color:'#a89580',marginBottom:'20px'}}>Zone: {hit.zone} · Current: ${hit.price.toFixed(2)}</div>
+        <div style={{fontSize:'13px',color:'#d4c8b8',marginBottom:'16px',fontStyle:'italic'}}>Did you act on this zone?</div>
+        <div style={{display:'flex',gap:'10px'}}>
+          <button onClick={onActed} style={{flex:1,background:bc,color:'#fff',border:'none',padding:'11px',fontFamily:'Georgia,serif',fontSize:'11px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:700,borderRadius:'2px'}}>Yes — log trade</button>
+          <button onClick={onMissed} style={{flex:1,background:'transparent',color:'#a89580',border:'1px solid #2a2520',padding:'11px',fontFamily:'Georgia,serif',fontSize:'11px',letterSpacing:'0.12em',textTransform:'uppercase',cursor:'pointer',borderRadius:'2px'}}>No — missed</button>
+        </div>
+        <button onClick={onDismiss} style={{width:'100%',marginTop:'8px',background:'transparent',color:'#5a5048',border:'none',padding:'6px',fontFamily:'Georgia,serif',fontSize:'10px',letterSpacing:'0.1em',cursor:'pointer'}}>dismiss without logging</button>
+      </div>
+    </div>
+  );
+}
+
 function MSTRCycleTool() {
   const [mstrPrice,setMstrPrice]=useState(134.73);
   const [btcPrice,setBtcPrice]=useState(80866);
@@ -99,6 +129,7 @@ function MSTRCycleTool() {
   const [dxyAbove110,setDxyAbove110]=useState(false);
   const [btcHoldings,setBtcHoldings]=useState(840447);
   const [dilutedShares,setDilutedShares]=useState(384.2);
+  const [corporateBaseUpdated,setCorporateBaseUpdated]=useState(null);
   const [startingShares,setStartingShares]=useState(474);
   const [cashBuffer,setCashBuffer]=useState(7964.20);
   const [gbpUsd,setGbpUsd]=useState(1.31);
@@ -117,21 +148,56 @@ function MSTRCycleTool() {
   const [atmActive,setAtmActive]=useState(true);
   const [ivRank,setIvRank]=useState(28);
   const [dataTimestamp,setDataTimestamp]=useState(null);
-  const [confidence,setConfidence]=useState('HIGH');
+  const [confidence,setConfidence]=useState(null);
   const [staleFields,setStaleFields]=useState(null);
+  const [levelsAuto,setLevelsAuto]=useState(true);
+  const [manualSellLow,setManualSellLow]=useState(192);
+  const [manualSellHigh,setManualSellHigh]=useState(200);
+  const [manualBuyLow,setManualBuyLow]=useState(170);
+  const [manualBuyHigh,setManualBuyHigh]=useState(180);
   const [trades,setTrades]=useState([]);
+  const [snapshots,setSnapshots]=useState([]);
+  const [misses,setMisses]=useState([]);
+  const [zoneHitKeys,setZoneHitKeys]=useState({});
+  const [zoneHitPrompt,setZoneHitPrompt]=useState(null);
+  const [aggressionStyle,setAggressionStyle]=useState('moderate');
+  const [positions,setPositions]=useState([]);
+  const [positionForm,setPositionForm]=useState({shares:'',entryPrice:'',stop:'',target:'',tag:'MANUAL',notes:''});
+  const [exitPrices,setExitPrices]=useState({});
   const [view,setView]=useState('dashboard');
   
-  // Unpaired Trade Logger State
+  // Standalone DCA / Unpaired Logger State
   const [tradeType,setTradeType]=useState('SELL');
   const [tradeShares,setTradeShares]=useState('');
-  const [tradePriceMode,setTradePriceMode]=useState('GBP_TOTAL');
   const [tradePriceInput,setTradePriceInput]=useState('');
+  const [tradePriceMode,setTradePriceMode]=useState('GBP_TOTAL');
   const [tradeDate,setTradeDate]=useState(new Date().toISOString().slice(0,10));
+  const [tradeFees,setTradeFees]=useState('');
   const [autoSyncCash,setAutoSyncCash]=useState(true);
 
   const [promptCopied,setPromptCopied]=useState(false);
+  const [promptSelectMsg,setPromptSelectMsg]=useState('');
   const promptTextareaRef=useRef(null);
+  const [beqSellShares,setBeqSellShares]=useState('');
+  const [beqSellPrice,setBeqSellPrice]=useState('');
+  const [projBearBtc,setProjBearBtc]=useState(45000);
+  const [projBaseBtc,setProjBaseBtc]=useState(120000);
+  const [projBullBtc,setProjBullBtc]=useState(250000);
+  const [projBearMnav,setProjBearMnav]=useState(1.0);
+  const [projBaseMnav,setProjBaseMnav]=useState(1.6);
+  const [projBullMnav,setProjBullMnav]=useState(2.2);
+  const [projShares,setProjShares]=useState(null);
+  const [importText,setImportText]=useState('');
+  const [importResult,setImportResult]=useState(null);
+  const [cashBufferUpdated,setCashBufferUpdated]=useState(null);
+  const [regimeLog,setRegimeLog]=useState([]);
+  const [bearBreakdownOpen,setBearBreakdownOpen]=useState(false);
+  const [bottomBreakdownOpen,setBottomBreakdownOpen]=useState(false);
+  const prevModeRef=useRef(null);
+  const [nuplTrough,setNuplTrough]=useState(null);
+  const [mvrvTrough,setMvrvTrough]=useState(null);
+  const [btcTrough,setBtcTrough]=useState(null);
+  const [hoardEntryDate,setHoardEntryDate]=useState(null);
 
   useEffect(()=>{
     try{const s=JSON.parse(localStorage.getItem('mstr:settings')||'null');if(s){
@@ -139,6 +205,12 @@ function MSTRCycleTool() {
       if(s.btcPrice!==undefined)setBtcPrice(s.btcPrice);
       if(s.ma200!==undefined)setMa200(s.ma200);
       if(s.lastUpdated!==undefined)setLastUpdated(s.lastUpdated);
+      if(s.high20!==undefined)setHigh20(s.high20);
+      if(s.low20!==undefined)setLow20(s.low20);
+      if(s.high50!==undefined)setHigh50(s.high50);
+      if(s.low50!==undefined)setLow50(s.low50);
+      if(s.low200!==undefined)setLow200(s.low200);
+      if(s.atr14!==undefined)setAtr14(s.atr14);
       if(s.nupl!==undefined)setNupl(s.nupl);
       if(s.mvrv!==undefined)setMvrv(s.mvrv);
       if(s.fundingNegative!==undefined)setFundingNegative(s.fundingNegative);
@@ -148,9 +220,16 @@ function MSTRCycleTool() {
       if(s.dxyAbove110!==undefined)setDxyAbove110(s.dxyAbove110);
       if(s.btcHoldings!==undefined)setBtcHoldings(s.btcHoldings);
       if(s.dilutedShares!==undefined)setDilutedShares(s.dilutedShares);
+      if(s.corporateBaseUpdated!==undefined)setCorporateBaseUpdated(s.corporateBaseUpdated);
       if(s.startingShares!==undefined)setStartingShares(s.startingShares);
       if(s.cashBuffer!==undefined)setCashBuffer(s.cashBuffer);
       if(s.gbpUsd!==undefined)setGbpUsd(s.gbpUsd);
+      if(s.levelsAuto!==undefined)setLevelsAuto(s.levelsAuto);
+      if(s.manualSellLow!==undefined)setManualSellLow(s.manualSellLow);
+      if(s.manualSellHigh!==undefined)setManualSellHigh(s.manualSellHigh);
+      if(s.manualBuyLow!==undefined)setManualBuyLow(s.manualBuyLow);
+      if(s.manualBuyHigh!==undefined)setManualBuyHigh(s.manualBuyHigh);
+      if(s.aggressionStyle!==undefined)setAggressionStyle(s.aggressionStyle);
       if(s.parsedMnav!==undefined)setParsedMnav(s.parsedMnav);
       if(s.totalDebt!==undefined)setTotalDebt(s.totalDebt);
       if(s.preferredNotional!==undefined)setPreferredNotional(s.preferredNotional);
@@ -161,43 +240,471 @@ function MSTRCycleTool() {
       if(s.etfOutflowsPersistent!==undefined)setEtfOutflowsPersistent(s.etfOutflowsPersistent);
       if(s.mnavCompressed!==undefined)setMnavCompressed(s.mnavCompressed);
       if(s.mnavEuphoric!==undefined)setMnavEuphoric(s.mnavEuphoric);
+      if(s.dataTimestamp!==undefined)setDataTimestamp(s.dataTimestamp);
+      if(s.confidence!==undefined)setConfidence(s.confidence);
+      if(s.staleFields!==undefined)setStaleFields(s.staleFields);
       if(s.btcDominance!==undefined)setBtcDominance(s.btcDominance);
       if(s.mstrShortInt!==undefined)setMstrShortInt(s.mstrShortInt);
       if(s.atmActive!==undefined)setAtmActive(s.atmActive);
       if(s.ivRank!==undefined)setIvRank(s.ivRank);
+      if(s.projBearBtc!==undefined)setProjBearBtc(s.projBearBtc);
+      if(s.projBaseBtc!==undefined)setProjBaseBtc(s.projBaseBtc);
+      if(s.projBullBtc!==undefined)setProjBullBtc(s.projBullBtc);
+      if(s.projBearMnav!==undefined)setProjBearMnav(s.projBearMnav);
+      if(s.projBaseMnav!==undefined)setProjBaseMnav(s.projBaseMnav);
+      if(s.projBullMnav!==undefined)setProjBullMnav(s.projBullMnav);
+      if(s.projShares!==undefined)setProjShares(s.projShares);
+      if(s.nuplTrough!==undefined)setNuplTrough(s.nuplTrough);
+      if(s.mvrvTrough!==undefined)setMvrvTrough(s.mvrvTrough);
+      if(s.btcTrough!==undefined)setBtcTrough(s.btcTrough);
+      if(s.hoardEntryDate!==undefined)setHoardEntryDate(s.hoardEntryDate);
     }}catch(e){}
     try{const t=localStorage.getItem('mstr:trades');if(t)setTrades(JSON.parse(t));}catch(e){}
+    try{const sn=localStorage.getItem('mstr:snapshots');if(sn)setSnapshots(JSON.parse(sn));}catch(e){}
+    try{const pos=localStorage.getItem('mstr:positions');if(pos)setPositions(JSON.parse(pos));}catch(e){}
+    try{const ms=localStorage.getItem('mstr:misses');if(ms)setMisses(JSON.parse(ms));}catch(e){}
+    try{const zk=localStorage.getItem('mstr:zoneHitKeys');if(zk)setZoneHitKeys(JSON.parse(zk));}catch(e){}
+    try{const rl=localStorage.getItem('mstr:regimeLog');if(rl)setRegimeLog(JSON.parse(rl));}catch(e){}
+    try{const s=JSON.parse(localStorage.getItem('mstr:settings')||'null');if(s&&s.cashBufferUpdated)setCashBufferUpdated(s.cashBufferUpdated);}catch(e){}
   },[]);
 
   useEffect(()=>{
     try{localStorage.setItem('mstr:settings',JSON.stringify({
       mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,
       nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,
-      btcHoldings,dilutedShares,startingShares,cashBuffer,gbpUsd,
+      btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,
+      levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,
       parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,
       etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,
-      btcDominance,mstrShortInt,atmActive,ivRank
+      btcDominance,mstrShortInt,atmActive,ivRank,
+      projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,
+      cashBufferUpdated,nuplTrough,mvrvTrough,btcTrough,hoardEntryDate,
     }));}catch(e){}
   },[mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,
      nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,
-     btcHoldings,dilutedShares,startingShares,cashBuffer,gbpUsd,
+     btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,
+     levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,
      parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,
      etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,
-     btcDominance,mstrShortInt,atmActive,ivRank]);
+     btcDominance,mstrShortInt,atmActive,ivRank,
+     projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,
+     cashBufferUpdated,nuplTrough,mvrvTrough,btcTrough,hoardEntryDate]);
+
+  const handleHoldingsChange=v=>{setBtcHoldings(v);setCorporateBaseUpdated(new Date().toISOString().slice(0,10));};
+  const handleSharesChange=v=>{setDilutedShares(v);setCorporateBaseUpdated(new Date().toISOString().slice(0,10));};
+  const handleCashBufferChange=v=>{setCashBuffer(v);setCashBufferUpdated(new Date().toISOString());};
 
   const btcPerShare=useMemo(()=>btcHoldings/(dilutedShares*1_000_000),[btcHoldings,dilutedShares]);
   const fairValue=useMemo(()=>btcPerShare*btcPrice,[btcPerShare,btcPrice]);
   const legacyMnav=useMemo(()=>fairValue>0?mstrPrice/fairValue:0,[mstrPrice,fairValue]);
   const mNAV=useMemo(()=>parsedMnav!==null?parsedMnav:legacyMnav,[parsedMnav,legacyMnav]);
+  const mNAVisLegacy=parsedMnav===null;
+
+  const recomputedMnav=useMemo(()=>{
+    if(totalDebt===null||preferredNotional===null||cashPosition===null)return null;
+    const marketCap=mstrPrice*dilutedShares;
+    const ev=marketCap+totalDebt+preferredNotional-cashPosition;
+    const btcNav=(btcHoldings*btcPrice)/1_000_000;
+    return btcNav>0?ev/btcNav:null;
+  },[mstrPrice,dilutedShares,totalDebt,preferredNotional,cashPosition,btcHoldings,btcPrice]);
+
+  const mNAVdiscrepancy=useMemo(()=>{
+    if(parsedMnav===null||recomputedMnav===null)return null;
+    return Math.abs(Math.round(parsedMnav*100)/100-Math.round(recomputedMnav*100)/100);
+  },[parsedMnav,recomputedMnav]);
+  const MNAV_WARN=0.15;
+
+  const headerMnavInfo=useMemo(()=>{
+    const diverged=mNAVdiscrepancy!==null&&mNAVdiscrepancy>MNAV_WARN;
+    if(recomputedMnav!==null&&diverged)return{value:recomputedMnav,overridden:true,parsedWas:parsedMnav};
+    return{value:mNAV,overridden:false,parsedWas:null};
+  },[recomputedMnav,mNAV,mNAVdiscrepancy,parsedMnav]);
+
+  const MVRV_PEAK=3.0,MVRV_FLOOR=0.8;
+  const cycleData=useMemo(()=>{
+    const ath=new Date('2025-10-06'),target=new Date('2026-10-06'),now=new Date();
+    const totalDays=Math.round((target-ath)/86400000);
+    const elapsed=Math.round((now-ath)/86400000);
+    const remaining=Math.round((target-now)/86400000);
+    const progress=Math.min(100,Math.max(0,(elapsed/totalDays)*100));
+    return{totalDays,elapsed,remaining,progress};
+  },[lastUpdated]);
+
+  const mvrvClock=useMemo(()=>{
+    const progress=Math.min(100,Math.max(0,((MVRV_PEAK-mvrv)/(MVRV_PEAK-MVRV_FLOOR))*100));
+    let zone,zoneColor;
+    if(mvrv>=3.0){zone='Euphoria — peak distribution risk';zoneColor='#c73e1d';}
+    else if(mvrv>=2.0){zone='Distribution — late-cycle elevated';zoneColor='#c73e1d';}
+    else if(mvrv>=1.5){zone='Caution — premium above fair value';zoneColor='#d4a017';}
+    else if(mvrv>=1.0){zone='Healthy — within normal range';zoneColor='#d4a017';}
+    else if(mvrv>=0.8){zone='Compressed — approaching floor';zoneColor='#2d8659';}
+    else{zone='Capitulation — below cost basis';zoneColor='#2d8659';}
+    const pctToFloor=Math.max(0,((mvrv-MVRV_FLOOR)/(MVRV_PEAK-MVRV_FLOOR))*100);
+    return{progress,zone,zoneColor,pctToFloor};
+  },[mvrv]);
+
+  const daysSinceBaseUpdate=useMemo(()=>{
+    if(!corporateBaseUpdated)return null;
+    return Math.floor((new Date()-new Date(corporateBaseUpdated))/86400000);
+  },[corporateBaseUpdated,lastUpdated]);
+
+  const cashBufferStaleDays=useMemo(()=>{
+    if(!cashBufferUpdated)return null;
+    return Math.floor((new Date()-new Date(cashBufferUpdated))/86400000);
+  },[cashBufferUpdated]);
+
+  const freshness=useMemo(()=>{
+    let ts=null,source=null;
+    if(dataTimestamp){const p=new Date(dataTimestamp);if(!isNaN(p.getTime())){ts=p;source='data-timestamp';}}
+    if(!ts&&lastUpdated){const p=new Date(lastUpdated);if(!isNaN(p.getTime())){ts=p;source='paste-time';}}
+    if(!ts)return{tier:'none',hours:null,source:null};
+    const hours=(Date.now()-ts.getTime())/3600000;
+    return{tier:hours>72?'red':hours>24?'amber':'fresh',hours,source,ts};
+  },[dataTimestamp,lastUpdated]);
+
+  const dilutionBrakeActive=useMemo(()=>atmActive&&mNAV!==null&&mNAV<1.2,[atmActive,mNAV]);
+
+  const baseProfile=useMemo(()=>{
+    switch(aggressionStyle){
+      case 'conservative':return{label:'Conservative',rotationSizePctLow:15,rotationSizePctHigh:20,bandWidthMult:0.55,hoardSensitivity:1.15,deployLadderSteepness:0.9};
+      case 'aggressive':return{label:'Aggressive',rotationSizePctLow:35,rotationSizePctHigh:45,bandWidthMult:0.28,hoardSensitivity:0.85,deployLadderSteepness:1.15};
+      default:return{label:'Moderate (Base)',rotationSizePctLow:25,rotationSizePctHigh:30,bandWidthMult:0.4,hoardSensitivity:1.0,deployLadderSteepness:1.0};
+    }
+  },[aggressionStyle]);
+
+  const profile=useMemo(()=>{
+    if(!dilutionBrakeActive)return baseProfile;
+    return{...baseProfile,rotationSizePctLow:Math.round(baseProfile.rotationSizePctLow*0.5*10)/10,rotationSizePctHigh:Math.round(baseProfile.rotationSizePctHigh*0.5*10)/10};
+  },[baseProfile,dilutionBrakeActive]);
+
+  const technicals=useMemo(()=>{
+    if(high20===null||low20===null||atr14===null)return null;
+    return{high20,low20,high50,low50,low200,atr14};
+  },[high20,low20,high50,low50,low200,atr14]);
+
+  const sthMstrFloor=useMemo(()=>{
+    if(!sthRealizedPrice||btcPerShare<=0)return null;
+    return btcPerShare*sthRealizedPrice;
+  },[sthRealizedPrice,btcPerShare]);
+
+  const dynamicLevels=useMemo(()=>{
+    if(!technicals)return null;
+    const{high20,low20,atr14}=technicals;
+    const current=mstrPrice;
+    const rotateSellTarget=Math.max(high20,current+atr14);
+    const rotateBuyTarget=Math.min(low20,current-atr14);
+    const bandWidth=atr14*profile.bandWidthMult;
+    const hoardBuyAnchor=ma200?ma200*0.85:current-atr14*2;
+    const hoardBuyDeep=ma200?ma200*0.75:current-atr14*3;
+    const hoardBuyTarget=current-(current-hoardBuyAnchor)/profile.hoardSensitivity;
+    const hoardBuyDeepTarget=current-(current-hoardBuyDeep)/profile.hoardSensitivity;
+    let deployRungs,deployAnchorMode;
+    if(sthMstrFloor!==null){
+      const s=profile.deployLadderSteepness;
+      deployRungs=[{level:sthMstrFloor*(1+0.05*s),pct:25},{level:sthMstrFloor,pct:25},{level:sthMstrFloor*(1-0.10*s),pct:25},{level:sthMstrFloor*(1-0.20*s),pct:25}];
+      deployAnchorMode='sth';
+    }else if(ma200){
+      deployRungs=[{level:current,pct:25},{level:current-(current-ma200*0.85)*0.5*profile.deployLadderSteepness,pct:25},{level:current-(current-ma200*0.85)*profile.deployLadderSteepness,pct:25},{level:current-(current-ma200*0.65)*profile.deployLadderSteepness,pct:25}];
+      deployAnchorMode='200ma';
+    }else{
+      deployRungs=[{level:current,pct:25},{level:current*(1-0.10*profile.deployLadderSteepness),pct:25},{level:current*(1-0.20*profile.deployLadderSteepness),pct:25},{level:current*(1-0.30*profile.deployLadderSteepness),pct:25}];
+      deployAnchorMode='price';
+    }
+    return{
+      rotate:{sellLow:rotateSellTarget-bandWidth,sellHigh:rotateSellTarget+bandWidth,buyLow:rotateBuyTarget-bandWidth,buyHigh:rotateBuyTarget+bandWidth},
+      hoard:{sellLow:current+atr14*0.5,sellHigh:Math.max(high20,current+atr14*1.5),buyTarget:hoardBuyTarget,buyDeepTarget:hoardBuyDeepTarget},
+      deploy:{ladder:deployRungs,anchorMode:deployAnchorMode},
+    };
+  },[technicals,ma200,mstrPrice,profile,sthMstrFloor]);
+
+  const bearScore=useMemo(()=>{
+    let s=0;
+    if(btcPrice<65000)s+=1;if(btcPrice<50000)s+=2;
+    if(nupl<0)s+=2;if(mvrv<1.0)s+=1;
+    if(fundingNegative)s+=1;if(below200ma)s+=2;if(weeklyLowerLow)s+=1;if(dxyAbove110)s+=1;
+    if(cycleData.remaining>0&&cycleData.remaining<180)s+=1;
+    if(mNAV>=1.05&&mNAV<1.20)s+=1;if(mNAV>2.5)s+=2;
+    if(btcBelowSthCost)s+=1;if(etfOutflowsPersistent)s+=1;
+    if(btcDominance!==null&&btcDominance<50)s+=1;
+    if(atmActive&&mNAV!==null&&mNAV<1.2)s+=1;
+    if(ivRank!==null&&ivRank>75)s+=1;
+    return s;
+  },[btcPrice,nupl,mvrv,fundingNegative,below200ma,weeklyLowerLow,dxyAbove110,cycleData,mNAV,btcBelowSthCost,etfOutflowsPersistent,btcDominance,atmActive,ivRank]);
+
+  const bottomScore=useMemo(()=>{
+    let s=0;
+    if(mstrPrice<120)s+=2;if(mstrPrice<90)s+=2;if(btcPrice<55000)s+=2;if(btcPrice<45000)s+=2;
+    if(nupl<-25)s+=3;if(mvrv<0.8)s+=3;if(derivativesExhaustion)s+=2;
+    if(Math.abs(cycleData.remaining)<60)s+=2;if(mNAV>0&&mNAV<1.05)s+=2;
+    if(btcBelowSthCost)s+=1;if(mstrShortInt!==null&&mstrShortInt>20)s+=1;
+    return s;
+  },[mstrPrice,btcPrice,nupl,mvrv,derivativesExhaustion,cycleData,mNAV,btcBelowSthCost,mstrShortInt]);
+
+  const bearItems=useMemo(()=>{
+    const items=[];
+    if(btcPrice<65000)items.push({label:'BTC < $65,000',pts:1});
+    if(btcPrice<50000)items.push({label:'BTC < $50,000',pts:2});
+    if(nupl<0)items.push({label:'NUPL negative',pts:2});
+    if(mvrv<1.0)items.push({label:'MVRV < 1.0',pts:1});
+    if(fundingNegative)items.push({label:'Funding persistently negative',pts:1});
+    if(below200ma)items.push({label:'MSTR below 200-day MA',pts:2});
+    if(weeklyLowerLow)items.push({label:'Weekly lower-low confirmed',pts:1});
+    if(dxyAbove110)items.push({label:'DXY above 110',pts:1});
+    if(cycleData.remaining>0&&cycleData.remaining<180)items.push({label:`Cycle end <180d (${cycleData.remaining}d)`,pts:1});
+    if(mNAV>=1.05&&mNAV<1.20)items.push({label:`mNAV compressed ${mNAV.toFixed(2)}x`,pts:1});
+    if(mNAV>2.5)items.push({label:`mNAV euphoria ${mNAV.toFixed(2)}x`,pts:2});
+    if(btcBelowSthCost)items.push({label:'BTC below STH cost',pts:1});
+    if(etfOutflowsPersistent)items.push({label:'ETF outflows persistent',pts:1});
+    if(btcDominance!==null&&btcDominance<50)items.push({label:`BTC dominance ${btcDominance.toFixed(1)}% < 50`,pts:1});
+    if(atmActive&&mNAV!==null&&mNAV<1.2)items.push({label:'ATM active at low premium',pts:1});
+    if(ivRank!==null&&ivRank>75)items.push({label:`IV Rank ${ivRank} > 75`,pts:1});
+    return items;
+  },[btcPrice,nupl,mvrv,fundingNegative,below200ma,weeklyLowerLow,dxyAbove110,cycleData,mNAV,btcBelowSthCost,etfOutflowsPersistent,btcDominance,atmActive,ivRank]);
+
+  const bottomItems=useMemo(()=>{
+    const items=[];
+    if(mstrPrice<120)items.push({label:'MSTR < $120',pts:2});
+    if(mstrPrice<90)items.push({label:'MSTR < $90',pts:2});
+    if(btcPrice<55000)items.push({label:'BTC < $55,000',pts:2});
+    if(btcPrice<45000)items.push({label:'BTC < $45,000',pts:2});
+    if(nupl<-25)items.push({label:'NUPL < -25 (deep fear)',pts:3});
+    if(mvrv<0.8)items.push({label:'MVRV < 0.8 (capitulation)',pts:3});
+    if(derivativesExhaustion)items.push({label:'Derivatives exhaustion',pts:2});
+    if(Math.abs(cycleData.remaining)<60)items.push({label:`Cycle boundary ±60d`,pts:2});
+    if(mNAV>0&&mNAV<1.05)items.push({label:`mNAV sub-NAV ${mNAV.toFixed(2)}x`,pts:2});
+    if(btcBelowSthCost)items.push({label:'BTC below STH cost',pts:1});
+    if(mstrShortInt!==null&&mstrShortInt>20)items.push({label:`Short interest ${mstrShortInt.toFixed(1)}% > 20`,pts:1});
+    return items;
+  },[mstrPrice,btcPrice,nupl,mvrv,derivativesExhaustion,cycleData,mNAV,btcBelowSthCost,mstrShortInt]);
+
+  const DEPLOY_SCORE_MIN=7;
+  const DEPLOY_PRICE_CEILING_STATIC=140;
+  const DEPLOY_IMMINENT_PRICE=160;
+  const DEPLOY_IMMINENT_SCORE_MIN=4;
+
+  const dynamicCeiling=sthMstrFloor!==null?Math.round(sthMstrFloor*1.10):DEPLOY_PRICE_CEILING_STATIC;
+
+  const mode=useMemo(()=>{
+    if(bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice<dynamicCeiling)return'DEPLOY';
+    if(bearScore>=6)return'HOARD';
+    return'ROTATE';
+  },[bearScore,bottomScore,mstrPrice,dynamicCeiling]);
+
+  const deployImminent=useMemo(()=>{
+    if(mode!=='HOARD')return false;
+    return bottomScore>=DEPLOY_IMMINENT_SCORE_MIN&&bottomScore<DEPLOY_SCORE_MIN&&mstrPrice<DEPLOY_IMMINENT_PRICE;
+  },[mode,bottomScore,mstrPrice]);
+
+  useEffect(()=>{
+    const prev=prevModeRef.current;
+    if(prev===null){prevModeRef.current=mode;return;}
+    if(prev===mode){prevModeRef.current=mode;return;}
+    const entry={id:Date.now(),at:new Date().toISOString(),from:prev,to:mode,mstrPrice,btcPrice,bearScore,bottomScore,mNAV:Number(mNAV.toFixed(2))};
+    setRegimeLog(rl=>{const updated=[...rl,entry];try{localStorage.setItem('mstr:regimeLog',JSON.stringify(updated));}catch(e){}return updated;});
+    prevModeRef.current=mode;
+  },[mode]);
+
+  useEffect(()=>{
+    if(mode==='HOARD'){
+      if(hoardEntryDate===null){
+        setHoardEntryDate(new Date().toISOString().slice(0,10));
+        setNuplTrough(nupl);
+        setMvrvTrough(mvrv);
+        setBtcTrough(btcPrice);
+      } else {
+        if(nuplTrough===null||nupl<nuplTrough) setNuplTrough(nupl);
+        if(mvrvTrough===null||mvrv<mvrvTrough) setMvrvTrough(mvrv);
+        if(btcTrough===null||btcPrice<btcTrough) setBtcTrough(btcPrice);
+      }
+    } else {
+      if(hoardEntryDate!==null){
+        setHoardEntryDate(null);
+        setNuplTrough(null); setMvrvTrough(null); setBtcTrough(null);
+      }
+    }
+  },[mode,nupl,mvrv,btcPrice]);
+
+  const fmt=v=>`$${Math.round(v)}`;
+  const fmtR=(lo,hi)=>`${fmt(lo)}–${fmt(hi)}`;
+
+  const bandHits=useMemo(()=>{
+    if(!dynamicLevels)return[];
+    const hits=[],d=dynamicLevels,p=mstrPrice;
+    if(mode==='ROTATE'){
+      if(p>=d.rotate.sellLow&&p<=d.rotate.sellHigh)hits.push({tag:'ROTATE-SELL',side:'SELL',label:'ROTATE sell zone hit',zone:`${fmt(d.rotate.sellLow)}–${fmt(d.rotate.sellHigh)}`,price:p});
+      if(p>=d.rotate.buyLow&&p<=d.rotate.buyHigh)hits.push({tag:'ROTATE-BUY',side:'BUY',label:'ROTATE buy zone hit',zone:`${fmt(d.rotate.buyLow)}–${fmt(d.rotate.buyHigh)}`,price:p});
+    }
+    if(mode==='HOARD'){
+      if(p>=d.hoard.sellLow&&p<=d.hoard.sellHigh)hits.push({tag:'HOARD-SELL',side:'SELL',label:'HOARD sell zone hit',zone:`${fmt(d.hoard.sellLow)}–${fmt(d.hoard.sellHigh)}`,price:p});
+      const t=d.hoard.buyTarget;
+      if(p>=t*0.985&&p<=t*1.015)hits.push({tag:'HOARD-BUY',side:'BUY',label:'HOARD buy target reached',zone:fmt(t),price:p});
+      const dt=d.hoard.buyDeepTarget;
+      if(p<=dt*1.015)hits.push({tag:'HOARD-BUY-DEEP',side:'BUY',label:'HOARD deep buy target reached',zone:fmt(dt),price:p});
+    }
+    if(mode==='DEPLOY'){
+      d.deploy.ladder.forEach((rung,i)=>{
+        if(p<=rung.level*1.015)hits.push({tag:`DEPLOY-RUNG-${i+1}`,side:'BUY',label:`DEPLOY rung ${i+1} live (${rung.pct}%)`,zone:fmt(rung.level),price:p});
+      });
+    }
+    return hits;
+  },[dynamicLevels,mstrPrice,mode]);
+
+  const todayKey=useMemo(()=>new Date().toISOString().slice(0,10),[]);
+
+  useEffect(()=>{
+    if(view!=='dashboard')return;
+    if(bandHits.length===0)return;
+    for(const hit of bandHits){
+      const key=`${hit.tag}-${todayKey}`;
+      if(!zoneHitKeys[key]){setZoneHitPrompt({hit,key});return;}
+    }
+  },[bandHits,view,todayKey]);
+
+  const markZoneKey=useCallback((key,outcome)=>{
+    const updated={...zoneHitKeys,[key]:outcome};
+    setZoneHitKeys(updated);
+    try{localStorage.setItem('mstr:zoneHitKeys',JSON.stringify(updated));}catch(e){}
+  },[zoneHitKeys]);
+
+  const handleZoneActed=useCallback(()=>{
+    if(!zoneHitPrompt)return;
+    const{hit,key}=zoneHitPrompt;
+    markZoneKey(key,'acted');
+    setZoneHitPrompt(null);
+    setPositionForm(pf=>({...pf,entryPrice:String(hit.price.toFixed(2)),tag:hit.tag,shares:''}));
+    setView('positions');
+  },[zoneHitPrompt,markZoneKey]);
+
+  const handleZoneMissed=useCallback(()=>{
+    if(!zoneHitPrompt)return;
+    const{hit,key}=zoneHitPrompt;
+    markZoneKey(key,'missed');
+    const miss={id:Date.now(),date:new Date().toISOString().slice(0,10),time:new Date().toLocaleTimeString().slice(0,5),tag:hit.tag,side:hit.side,label:hit.label,zone:hit.zone,price:hit.price,mode};
+    const updated=[...misses,miss];
+    setMisses(updated);
+    try{localStorage.setItem('mstr:misses',JSON.stringify(updated));}catch(e){}
+    setZoneHitPrompt(null);
+  },[zoneHitPrompt,markZoneKey,misses,mode]);
+
+  const handleZoneDismiss=useCallback(()=>{
+    if(!zoneHitPrompt)return;
+    markZoneKey(zoneHitPrompt.key,'dismissed');
+    setZoneHitPrompt(null);
+  },[zoneHitPrompt,markZoneKey]);
+
+  const deleteMiss=id=>{
+    const updated=misses.filter(m=>m.id!==id);
+    setMisses(updated);
+    try{localStorage.setItem('mstr:misses',JSON.stringify(updated));}catch(e){}
+  };
+
+  const missStats=useMemo(()=>{
+    const keys=Object.keys(zoneHitKeys);
+    const actedSell=keys.filter(k=>zoneHitKeys[k]==='acted'&&k.includes('SELL')).length;
+    const actedBuy=keys.filter(k=>zoneHitKeys[k]==='acted'&&!k.includes('SELL')).length;
+    const sellMisses=misses.filter(m=>m.side==='SELL').length;
+    const buyMisses=misses.filter(m=>m.side==='BUY').length;
+    const totalSell=sellMisses+actedSell;
+    const totalBuy=buyMisses+actedBuy;
+    return{sellMisses,buyMisses,actedSell,actedBuy,totalSell,totalBuy,
+      execRateSell:totalSell>0?Math.round((actedSell/totalSell)*100):null,
+      execRateBuy:totalBuy>0?Math.round((actedBuy/totalBuy)*100):null};
+  },[misses,zoneHitKeys]);
+
+  const beqCalc=useMemo(()=>{
+    const sh=parseFloat(beqSellShares);
+    const sp=parseFloat(beqSellPrice)||mstrPrice;
+    if(!sh||sh<=0||!sp||sp<=0)return null;
+    const proceeds=sh*sp;
+    const breakeven=proceeds/(sh+1);
+    const steps=[-0.05,-0.10,-0.15,-0.20].map(pct=>{
+      const buyPrice=sp*(1+pct);
+      const sharesBought=proceeds/buyPrice;
+      const netExtra=sharesBought-sh;
+      return{pct:Math.abs(pct)*100,buyPrice,sharesBought,netExtra};
+    });
+    return{proceeds,breakeven,steps,sp,sh};
+  },[beqSellShares,beqSellPrice,mstrPrice]);
+
+  const levelDisplay=useMemo(()=>{
+    if(!levelsAuto||!dynamicLevels){
+      return{
+        rotate:{sell:fmtR(manualSellLow,manualSellHigh),buy:fmtR(manualBuyLow,manualBuyHigh)},
+        hoard:{sell:fmtR(manualSellLow,manualSellHigh),buy:`Wait — target ${fmt(manualBuyLow*0.7)}`},
+        deploy:{sell:'Do not sell',buy:'Ladder every 10% drop'},
+      };
+    }
+    const d=dynamicLevels;
+    return{
+      rotate:{sell:fmtR(d.rotate.sellLow,d.rotate.sellHigh),buy:fmtR(d.rotate.buyLow,d.rotate.buyHigh)},
+      hoard:{sell:fmtR(d.hoard.sellLow,d.hoard.sellHigh),buy:`Wait — target ${fmt(d.hoard.buyTarget)} / deep ${fmt(d.hoard.buyDeepTarget)}`},
+      deploy:{sell:'Do not sell',buy:`Ladder: ${d.deploy.ladder.map(l=>fmt(l.level)).join(' · ')}`},
+    };
+  },[levelsAuto,dynamicLevels,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh]);
+
+  const alertLevels=useMemo(()=>{
+    if(!levelsAuto||!dynamicLevels){
+      return{
+        rotate:{sellAlert:manualSellLow,buyAlert:manualBuyHigh},
+        hoard:{sellAlert:manualSellLow,buyAlert:manualBuyLow*0.7,buyDeepAlert:null},
+        deploy:{sellAlert:null,ladder:[]},
+      };
+    }
+    const d=dynamicLevels;
+    return{
+      rotate:{sellAlert:d.rotate.sellLow,buyAlert:d.rotate.buyHigh},
+      hoard:{sellAlert:d.hoard.sellLow,buyAlert:d.hoard.buyTarget,buyDeepAlert:d.hoard.buyDeepTarget},
+      deploy:{sellAlert:null,ladder:d.deploy.ladder.map(r=>r.level)},
+    };
+  },[levelsAuto,dynamicLevels,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh]);
+
+  const modeCfg={
+    ROTATE:{label:'NORMAL ROTATION',color:'#d4a017',bg:'#1a1611',action:'Sell at resistance, buy back at support.',cash:'0–25%'},
+    HOARD:{label:'CASH HOARD',color:'#c73e1d',bg:'#1a0f0d',action:'Sell at resistance. Do NOT buy back. Wait for deeper levels.',cash:'40–70%'},
+    DEPLOY:{label:'DEPLOY CASH',color:'#2d8659',bg:'#0f1a13',action:'Ladder cash into weakness. All-in accumulation.',cash:'Deploying to 0%'},
+  };
+  const cfg=modeCfg[mode];
+  const currentLevels=levelDisplay[mode.toLowerCase()];
+  const deploySuppressed=bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice>=dynamicCeiling;
+
+  const priceRange=useMemo(()=>{
+    if(!dynamicLevels)return null;
+    const RED='#c73e1d',GREEN='#2d8659',GOLD='#d4a017';
+    const p=mstrPrice,d=dynamicLevels;
+    if(mode==='ROTATE'){
+      const lo=d.rotate.buyLow,hi=d.rotate.sellHigh,span=hi-lo;
+      const pct=span>0?Math.max(0,Math.min(1,(p-lo)/span)):0.5;
+      const inSell=p>=d.rotate.sellLow,inBuy=p<=d.rotate.buyHigh;
+      return{pct,verdict:inSell?'IN SELL ZONE':inBuy?'IN BUY ZONE':'BETWEEN BANDS',tone:inSell?RED:inBuy?GREEN:GOLD,lo,hi,buyLow:d.rotate.buyLow,buyHigh:d.rotate.buyHigh,sellLow:d.rotate.sellLow,sellHigh:d.rotate.sellHigh};
+    }
+    if(mode==='HOARD'){
+      const target=d.hoard.buyTarget;
+      const pctToTarget=((p/target)-1)*100;
+      const inSell=p>=d.hoard.sellLow,atTarget=p<=target*1.015;
+      return{pct:null,verdict:inSell?'IN SELL ZONE':atTarget?'AT BUY TARGET':`${pctToTarget>0?'+':''}${pctToTarget.toFixed(1)}% vs target`,tone:inSell?RED:atTarget?GREEN:GOLD,target,deep:d.hoard.buyDeepTarget,sellLow:d.hoard.sellLow,sellHigh:d.hoard.sellHigh};
+    }
+    const liveRungs=d.deploy.ladder.filter(r=>p<=r.level*1.015);
+    return{pct:null,verdict:liveRungs.length>0?`${liveRungs.length}/4 RUNGS LIVE`:'ABOVE LADDER',tone:GREEN,ladder:d.deploy.ladder};
+  },[dynamicLevels,mstrPrice,mode]);
 
   const journalStats=useMemo(()=>{
-    let currentShares=startingShares;
+    let currentShares=startingShares,totalCash=0,rotationShares=0,rotationCostBasis=0,completedRotations=0,pendingSell=null,totalBuyCash=0;
     const sorted=[...trades].sort((a,b)=>a.date.localeCompare(b.date));
     sorted.forEach(t=>{
-      if(t.type==='SELL') currentShares-=t.shares;
-      else currentShares+=t.shares;
+      const gross=t.shares*t.price;
+      if(t.type==='SELL'){currentShares-=t.shares;totalCash+=gross-(t.fees||0);pendingSell={shares:t.shares,price:t.price,proceeds:gross-(t.fees||0)};}
+      else{currentShares+=t.shares;totalCash-=gross+(t.fees||0);totalBuyCash+=gross+(t.fees||0);
+        if(pendingSell!==null){const buyLegCost=gross+(t.fees||0);rotationShares+=t.shares-pendingSell.shares;rotationCostBasis+=buyLegCost;completedRotations+=1;pendingSell=null;}
+      }
     });
-    return {currentShares, tradeCount:trades.length};
+    const costPerExtraShare=(completedRotations>0&&rotationShares>0)?rotationCostBasis/rotationShares:null;
+    const weightedAvgCost=currentShares>0&&totalBuyCash>0?totalBuyCash/currentShares:null;
+    let accrualRateAnnual=null;
+    if(sorted.length>=2){
+      const spanDays=(new Date(sorted[sorted.length-1].date)-new Date(sorted[0].date))/86400000;
+      if(spanDays>60&&rotationShares>0)accrualRateAnnual=(rotationShares/spanDays)*365;
+    }
+    return{currentShares,totalCash,sharesDelta:currentShares-startingShares,sharesPct:startingShares>0?((currentShares-startingShares)/startingShares)*100:0,rotationShares,completedRotations,tradeCount:trades.length,costPerExtraShare,weightedAvgCost,accrualRateAnnual,totalBuyCash};
   },[trades,startingShares]);
 
   const portfolio=useMemo(()=>{
@@ -208,93 +715,140 @@ function MSTRCycleTool() {
     return{positionUSD,positionGBP,totalGBP,cashPct,positionPct:100-cashPct};
   },[journalStats.currentShares,mstrPrice,gbpUsd,cashBuffer]);
 
-  const bearScore=useMemo(()=>{
-    let s=0;
-    if(btcPrice<65000)s+=1;if(btcPrice<50000)s+=2;
-    if(nupl<0)s+=2;if(mvrv<1.0)s+=1;
-    if(fundingNegative)s+=1;if(below200ma)s+=2;if(weeklyLowerLow)s+=1;if(dxyAbove110)s+=1;
-    if(mNAV>=1.05&&mNAV<1.20)s+=1;if(mNAV>2.5)s+=2;
-    if(btcBelowSthCost)s+=1;if(etfOutflowsPersistent)s+=1;
-    if(btcDominance!==null&&btcDominance<50)s+=1;
-    if(atmActive&&mNAV!==null&&mNAV<1.2)s+=1;
-    if(ivRank!==null&&ivRank>75)s+=1;
-    return s;
-  },[btcPrice,nupl,mvrv,fundingNegative,below200ma,weeklyLowerLow,dxyAbove110,mNAV,btcBelowSthCost,etfOutflowsPersistent,btcDominance,atmActive,ivRank]);
+  const HOARD_CASH_MIN_PCT=40;
+  const HOARD_SELL_CEILING_PCT=40;
 
-  const bottomScore=useMemo(()=>{
-    let s=0;
-    if(mstrPrice<120)s+=2;if(mstrPrice<90)s+=2;if(btcPrice<55000)s+=2;if(btcPrice<45000)s+=2;
-    if(nupl<-25)s+=3;if(mvrv<0.8)s+=3;if(derivativesExhaustion)s+=2;
-    if(mNAV>0&&mNAV<1.05)s+=2;if(btcBelowSthCost)s+=1;if(mstrShortInt!==null&&mstrShortInt>20)s+=1;
-    return s;
-  },[mstrPrice,btcPrice,nupl,mvrv,derivativesExhaustion,mNAV,btcBelowSthCost,mstrShortInt]);
+  const hoardSellThrottled=useMemo(()=>
+    mode==='HOARD'&&portfolio.cashPct>=HOARD_SELL_CEILING_PCT
+  ,[mode,portfolio.cashPct]);
 
-  const sthMstrFloor=useMemo(()=>sthRealizedPrice&&btcPerShare>0?btcPerShare*sthRealizedPrice:null,[sthRealizedPrice,btcPerShare]);
-  const dynamicCeiling=sthMstrFloor!==null?Math.round(sthMstrFloor*1.10):140;
+  const hoardReadout=useMemo(()=>{
+    if(mode!=='HOARD')return null;
 
-  const mode=useMemo(()=>{
-    if(bottomScore>=7&&mstrPrice<dynamicCeiling)return'DEPLOY';
-    if(bearScore>=6)return'HOARD';
-    return'ROTATE';
-  },[bearScore,bottomScore,mstrPrice,dynamicCeiling]);
+    const structural=[];
+    const momentum=[];
+    const sentiment=[];
 
-  const addTrade=()=>{
-    const sharesNum = parseFloat(tradeShares);
-    const inputNum = parseFloat(tradePriceInput);
-    if(!sharesNum || sharesNum <= 0 || !inputNum || inputNum <= 0) return;
+    if(below200ma)structural.push({label:'Below 200-day MA',pts:2,clearing:'Clears when price sustains above 200MA (weeks)'});
+    if(weeklyLowerLow)structural.push({label:'Weekly lower-low',pts:1,clearing:'Clears after confirmed higher-high on weekly chart'});
+    if(btcPrice<65000)momentum.push({label:`BTC < $65k ($${btcPrice.toLocaleString()})`,pts:1,clearing:'Clears above $65k'});
+    if(btcPrice<50000)momentum.push({label:`BTC < $50k ($${btcPrice.toLocaleString()})`,pts:2,clearing:'Clears above $50k'});
+    if(nupl<0)momentum.push({label:`NUPL negative (${nupl.toFixed(1)}%)`,pts:2,clearing:'Clears when NUPL > 0 (on-chain profitability returns)'});
+    if(mvrv<1.0)momentum.push({label:`MVRV < 1.0 (${mvrv.toFixed(2)})`,pts:1,clearing:'Clears above 1.0 (holders back in profit)'});
+    if(mNAV>=1.05&&mNAV<1.20)momentum.push({label:`mNAV compressed (${mNAV.toFixed(2)}x)`,pts:1,clearing:'Clears above 1.20x'});
+    if(mNAV>2.5)momentum.push({label:`mNAV euphoria (${mNAV.toFixed(2)}x)`,pts:2,clearing:'N/A — euphoria signal'});
+    if(btcBelowSthCost)momentum.push({label:'BTC below STH cost basis',pts:1,clearing:'Clears when BTC recovers above STH realized price'});
+    if(fundingNegative)sentiment.push({label:'Funding persistently negative',pts:1,clearing:'Clears when funding normalises or turns positive'});
+    if(dxyAbove110)sentiment.push({label:'DXY above 110',pts:1,clearing:'Clears on dollar weakness'});
+    if(etfOutflowsPersistent)sentiment.push({label:'ETF outflows persistent',pts:1,clearing:'Clears when 5D flow turns positive'});
+    if(btcDominance!==null&&btcDominance<50)sentiment.push({label:`BTC dominance low (${btcDominance.toFixed(1)}%)`,pts:1,clearing:'Clears above 50%'});
+    if(atmActive&&mNAV!==null&&mNAV<1.2)sentiment.push({label:'ATM active at low premium',pts:1,clearing:'Clears when ATM pauses or mNAV > 1.2'});
+    if(ivRank!==null&&ivRank>75)sentiment.push({label:`IV Rank elevated (${ivRank})`,pts:1,clearing:'Clears when options normalise below 75'});
 
-    let finalPriceUsd = 0;
-    let totalProceedsGbp = 0;
+    const structuralPts=structural.reduce((a,s)=>a+s.pts,0);
+    const momentumPts=momentum.reduce((a,s)=>a+s.pts,0);
+    const sentimentPts=sentiment.reduce((a,s)=>a+s.pts,0);
 
-    if(tradePriceMode === 'USD') {
-      finalPriceUsd = inputNum;
-      totalProceedsGbp = (sharesNum * finalPriceUsd) / gbpUsd;
-    } else if(tradePriceMode === 'GBP_TOTAL') {
-      totalProceedsGbp = inputNum;
-      const pricePerShareGbp = totalProceedsGbp / sharesNum;
-      finalPriceUsd = pricePerShareGbp * gbpUsd;
-    } else if(tradePriceMode === 'GBP_PRICE') {
-      totalProceedsGbp = inputNum * sharesNum;
-      finalPriceUsd = inputNum * gbpUsd;
-    } else if(tradePriceMode === 'GBX') {
-      const pricePerShareGbp = inputNum / 100;
-      totalProceedsGbp = pricePerShareGbp * sharesNum;
-      finalPriceUsd = pricePerShareGbp * gbpUsd;
+    const nuplDelta=(nuplTrough!==null&&nupl>nuplTrough)?+(nupl-nuplTrough).toFixed(1):null;
+    const mvrvDelta=(mvrvTrough!==null&&mvrv>mvrvTrough)?+(mvrv-mvrvTrough).toFixed(2):null;
+    const btcAboveTrough=(btcTrough!==null&&btcTrough>0)?+((btcPrice/btcTrough-1)*100).toFixed(1):null;
+    const hoardWeeks=hoardEntryDate?Math.floor((Date.now()-new Date(hoardEntryDate).getTime())/604800000):null;
+
+    const recovering=nuplDelta!==null&&nuplDelta>5;
+    const deeplyRecovering=nuplDelta!==null&&nuplDelta>15;
+    const mvrvRecovering=mvrvDelta!==null&&mvrvDelta>0.1;
+
+    const parts=[];
+    const totalActive=structural.length+momentum.length+sentiment.length;
+    const locked=structuralPts;
+
+    if(structural.length>0&&momentum.length===0&&sentiment.length===0){
+      parts.push(`HOARD driven entirely by ${structural.length} structural signal${structural.length>1?'s':''} — ${structural.map(s=>s.label).join(', ')}. These are the slowest to clear.`);
+    } else if(structural.length>0){
+      parts.push(`${structural.length} structural signal${structural.length>1?'s':''} anchoring HOARD (${structural.map(s=>s.label).join(', ')}).`);
+    }
+    if(momentum.length>0){
+      const recStr=deeplyRecovering?' Momentum signals recovering strongly (NUPL +'+nuplDelta+'pts from trough).':recovering?' Momentum signals showing early recovery (NUPL +'+nuplDelta+'pts from trough).':' Momentum signals still at or near lows.';
+      parts.push(`${momentum.length} momentum signal${momentum.length>1?'s':''} active.${recStr}`);
+    }
+    if(sentiment.length>0){
+      parts.push(`${sentiment.length} sentiment signal${sentiment.length>1?'s':''} (${sentiment.map(s=>s.label).join(', ')}) — fastest to reverse.`);
+    }
+    if(hoardSellThrottled){
+      parts.push('Cash target met — sell throttle active. No further selling required.');
+    } else {
+      parts.push(`Cash at ${portfolio.cashPct.toFixed(1)}% — ${portfolio.cashPct<HOARD_SELL_CEILING_PCT?'still building toward 40% target.':'at or above target.'}`);
     }
 
-    const trade={
-      id: Date.now(),
-      date: tradeDate,
-      type: tradeType,
-      shares: sharesNum,
-      price: parseFloat(finalPriceUsd.toFixed(2)),
-      priceGbp: parseFloat((totalProceedsGbp / sharesNum).toFixed(2)),
-      totalGbp: parseFloat(totalProceedsGbp.toFixed(2))
-    };
-
-    const updated=[...trades, trade];
-    setTrades(updated);
-    try{localStorage.setItem('mstr:trades',JSON.stringify(updated));}catch(e){}
-
-    if(autoSyncCash) {
-      if(tradeType === 'SELL') {
-        setCashBuffer(parseFloat((cashBuffer + totalProceedsGbp).toFixed(2)));
-      } else {
-        setCashBuffer(parseFloat(Math.max(0, cashBuffer - totalProceedsGbp).toFixed(2)));
-      }
+    let actionNote=null;
+    if(deeplyRecovering&&structural.length<=1&&sentimentPts===0&&hoardWeeks!==null&&hoardWeeks>8){
+      actionNote={text:'Recovery momentum is strong and sentiment has cleared. Only structural signals remain. Consider reviewing whether HOARD intensity is still warranted.',tone:'amber'};
+    } else if(deeplyRecovering&&structural.length===0){
+      actionNote={text:'All structural and sentiment signals cleared. HOARD is held solely by momentum — monitor closely for ROTATE transition.',tone:'green'};
+    } else if(totalActive<=1&&hoardSellThrottled){
+      actionNote={text:'Single signal holding HOARD with cash target met. Approaching ROTATE conditions — watch for this signal to clear.',tone:'amber'};
+    } else if(!recovering&&!mvrvRecovering&&hoardWeeks!==null&&hoardWeeks<4){
+      actionNote={text:'Early in HOARD spell. Signals not yet recovering — standard posture appropriate.',tone:'neutral'};
+    } else if(locked>=4&&momentumPts===0&&sentimentPts===0){
+      actionNote={text:'Held by structural signals only — these clear slowly. Patience required; focus on cash target progress.',tone:'neutral'};
     }
 
-    setTradeShares('');
-    setTradePriceInput('');
-  };
+    return{structural,momentum,sentiment,structuralPts,momentumPts,sentimentPts,
+           nuplDelta,mvrvDelta,btcAboveTrough,hoardWeeks,recovering,deeplyRecovering,
+           summary:parts.join(' '),actionNote};
+  },[mode,below200ma,weeklyLowerLow,btcPrice,nupl,mvrv,mNAV,btcBelowSthCost,
+     fundingNegative,dxyAbove110,etfOutflowsPersistent,btcDominance,atmActive,ivRank,
+     nuplTrough,mvrvTrough,btcTrough,hoardEntryDate,hoardSellThrottled,portfolio.cashPct]);
 
-  const deleteTrade=id=>{
-    const updated=trades.filter(t=>t.id!==id);
-    setTrades(updated);
-    try{localStorage.setItem('mstr:trades',JSON.stringify(updated));}catch(e){}
-  };
+  const sizingGuardrail=useMemo(()=>{
+    const currentSh=journalStats.currentShares;
+    if(currentSh<=0)return null;
+    const maxSharesFromPosition=Math.floor(currentSh*profile.rotationSizePctHigh/100);
+    const cashUSD=cashBuffer*gbpUsd;
+    const maxSharesFromCash=mstrPrice>0?Math.floor(cashUSD/mstrPrice):0;
+    const cashGateFailed=mode==='HOARD'&&portfolio.cashPct<HOARD_CASH_MIN_PCT;
+    const maxBuyShares=cashGateFailed?0:Math.min(maxSharesFromPosition,maxSharesFromCash>0?maxSharesFromCash:maxSharesFromPosition);
+    const sellThrottled=mode==='HOARD'&&portfolio.cashPct>=HOARD_SELL_CEILING_PCT;
+    const maxSellShares=sellThrottled?0:maxSharesFromPosition;
+    return{maxSellShares,maxBuyShares,
+      maxSellGBP:(maxSellShares*mstrPrice)/gbpUsd,
+      maxBuyGBP:(maxBuyShares*mstrPrice)/gbpUsd,
+      pctUsed:profile.rotationSizePctHigh,
+      cashGateFailed,cashGateReason:cashGateFailed?`HOARD regime requires ≥${HOARD_CASH_MIN_PCT}% cash — current ${portfolio.cashPct.toFixed(1)}%`:null,
+      sellThrottled,sellThrottleReason:sellThrottled?`Cash target met (${portfolio.cashPct.toFixed(1)}% ≥ ${HOARD_SELL_CEILING_PCT}%) — sell throttle active`:null};
+  },[journalStats.currentShares,profile,cashBuffer,gbpUsd,mstrPrice,mode,portfolio.cashPct]);
 
-  const fullClaudePrompt = `You are providing market data for a live trading decision tool. Accuracy and freshness are critical — stale, hallucinated, or guessed data causes catastrophic trading losses. Follow all four phases below exactly.
+  const thesisPerf=useMemo(()=>{
+    const rotationAlphaGBP=journalStats.rotationShares>0?(journalStats.rotationShares*mstrPrice)/gbpUsd:0;
+    const alphaConfirmed=journalStats.costPerExtraShare!==null&&journalStats.costPerExtraShare<mstrPrice*0.90;
+    const discountPct=journalStats.costPerExtraShare!==null&&mstrPrice>0?((mstrPrice-journalStats.costPerExtraShare)/mstrPrice)*100:null;
+    const btcExposure=journalStats.currentShares*btcPerShare;
+    return{rotationAlphaGBP,alphaConfirmed,discountPct,btcExposure};
+  },[journalStats,mstrPrice,gbpUsd,btcPerShare]);
+
+  const projectionScenarios=useMemo(()=>{
+    const effectiveShares=projShares!==null?projShares:dilutedShares;
+    const currentSh=journalStats.currentShares;
+    return[
+      {label:'Bear',color:'#c73e1d',btc:projBearBtc,mnav:projBearMnav},
+      {label:'Base',color:'#d4a017',btc:projBaseBtc,mnav:projBaseMnav},
+      {label:'Bull',color:'#2d8659',btc:projBullBtc,mnav:projBullMnav},
+    ].map(sc=>{
+      const btcNavPerShare=effectiveShares>0?(btcHoldings*sc.btc)/(effectiveShares*1_000_000):0;
+      const impliedPrice=btcNavPerShare*sc.mnav;
+      const positionUSD=currentSh*impliedPrice;
+      const positionGBP=positionUSD/gbpUsd;
+      const totalGBP=positionGBP+cashBuffer;
+      const vsCurrentPct=portfolio.totalGBP>0?((totalGBP-portfolio.totalGBP)/portfolio.totalGBP)*100:0;
+      return{...sc,btcNavPerShare,impliedPrice,positionUSD,positionGBP,totalGBP,vsCurrentPct};
+    });
+  },[projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,dilutedShares,btcHoldings,journalStats.currentShares,gbpUsd,cashBuffer,portfolio.totalGBP]);
+
+  const saveSnapshot=useCallback(()=>{
+    const snap={date:new Date().toISOString(),mstrPrice,btcPrice,nupl,mvrv,mNAV:Number(mNAV.toFixed(2)),bearScore,bottomScore,mode,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,btcDominance,mstrShortInt,atmActive,ivRank,currentShares:journalStats.currentShares,cashBufferGBP:cashBuffer,gbpUsd};
+    setSnapshots(prev=>{const updated=[...prev,snap];try{localStorage.setItem('mstr:snapshots',JSON.stringify(updated));}catch(e){}return updated;});
+  },[mstrPrice,btcPrice,nupl,mvrv,mNAV,bearScore,bottomScore,mode,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,btcDominance,mstrShortInt,atmActive,ivRank,journalStats.currentShares,cashBuffer,gbpUsd]);
+  const claudePrompt=`You are providing market data for a live trading decision tool. Accuracy and freshness are critical — stale, hallucinated, or guessed data causes catastrophic trading losses. Follow all four phases below exactly.
 
 PHASE 1 — STATE THE CURRENT TIME
 Write one line: "Current time: YYYY-MM-DD HH:MM UTC" before executing any searches.
@@ -395,192 +949,862 @@ CONFIDENCE: HIGH = all live under 24h, no estimates. MEDIUM = 1-2 estimated/stal
 POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit math. D) Confidence justification. E) Other notes.`;
 
   const copyPrompt=async()=>{
-    try{
-      await navigator.clipboard.writeText(fullClaudePrompt);
-      setPromptCopied(true);
-      setTimeout(()=>setPromptCopied(false),2500);
-    }catch(e){}
+    const text=claudePrompt;let success=false;
+    try{await navigator.clipboard.writeText(text);success=true;}
+    catch(e1){try{const ta=promptTextareaRef.current;if(ta){ta.removeAttribute('readonly');ta.focus();ta.select();ta.setSelectionRange(0,text.length);success=document.execCommand('copy');ta.setAttribute('readonly','');ta.blur();}}catch(e2){success=false;}}
+    if(success){setPromptCopied(true);setTimeout(()=>setPromptCopied(false),2500);}
+    else{try{const ta=promptTextareaRef.current;if(ta){ta.removeAttribute('readonly');ta.focus();ta.setSelectionRange(0,text.length);ta.setAttribute('readonly','');}}catch(e){}
+      setPromptSelectMsg('Text selected — tap and hold, then Copy');setTimeout(()=>setPromptSelectMsg(''),4000);}
   };
+  const handlePromptTextareaClick=()=>{const ta=promptTextareaRef.current;if(ta){ta.removeAttribute('readonly');ta.focus();ta.select();ta.setSelectionRange(0,claudePrompt.length);ta.setAttribute('readonly','');}};
 
   const applyPaste=()=>{
-    if(!pasteText.trim())return;
+    if(!pasteText.trim()){setPasteResult({ok:false,msg:'Empty paste'});return;}
     let text=pasteText.replace(/---BEGIN DATA---/g,'').replace(/---END DATA---/g,'').replace(/```[a-z]*\n?/gi,'').replace(/```/g,'');
     const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);
+    const applied=[],skipped=[];
     const safeNum=(raw,{allowNegative=false,allowZero=false}={})=>{const n=Number(raw);if(!Number.isFinite(n))return null;if(!allowNegative&&n<0)return null;if(!allowZero&&n===0)return null;return n;};
-
     for(const line of lines){
       const m=line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/);if(!m)continue;
       const key=m[1].toUpperCase(),val=m[2].trim(),cv=val.replace(/[$,%]/g,'');
       const bv=/^on$|^true$|^yes$|^1$/i.test(val);
       switch(key){
-        case'MSTR_PRICE':{const n=safeNum(cv);if(n!==null)setMstrPrice(n);break;}
-        case'MSTR_200MA':{const n=safeNum(cv);if(n!==null)setMa200(n);break;}
-        case'MSTR_20D_HIGH':{const n=safeNum(cv);if(n!==null)setHigh20(n);break;}
-        case'MSTR_20D_LOW':{const n=safeNum(cv);if(n!==null)setLow20(n);break;}
-        case'MSTR_50D_HIGH':{const n=safeNum(cv);if(n!==null)setHigh50(n);break;}
-        case'MSTR_50D_LOW':{const n=safeNum(cv);if(n!==null)setLow50(n);break;}
-        case'MSTR_200D_LOW':{const n=safeNum(cv);if(n!==null)setLow200(n);break;}
-        case'MSTR_ATR14':{const n=safeNum(cv);if(n!==null)setAtr14(n);break;}
-        case'BTC_PRICE':{const n=safeNum(cv);if(n!==null)setBtcPrice(n);break;}
-        case'NUPL':{const n=safeNum(cv,{allowNegative:true,allowZero:true});if(n!==null)setNupl(n);break;}
-        case'MVRV':{const n=safeNum(cv);if(n!==null)setMvrv(n);break;}
-        case'BTC_HOLDINGS':{const n=safeNum(cv);if(n!==null)setBtcHoldings(n);break;}
-        case'DILUTED_SHARES':{const n=safeNum(cv);if(n!==null){const sh=n>10000?n/1_000_000:n;setDilutedShares(sh);}break;}
-        case'BELOW_200MA':setBelow200ma(bv);break;
-        case'WEEKLY_LL':setWeeklyLowerLow(bv);break;
-        case'SHORTING':setFundingNegative(bv);if(bv)setDerivativesExhaustion(false);break;
-        case'EXHAUSTION':setDerivativesExhaustion(bv);if(bv)setFundingNegative(false);break;
-        case'DXY_ABOVE_110':setDxyAbove110(bv);break;
-        case'STH_REALIZED_PRICE':{const n=safeNum(cv);if(n!==null)setSthRealizedPrice(n);break;}
-        case'ETF_FLOWS_5D':{const n=safeNum(cv,{allowNegative:true,allowZero:true});if(n!==null)setEtfFlows5d(n);break;}
-        case'TOTAL_DEBT':{const n=safeNum(cv,{allowZero:true});if(n!==null)setTotalDebt(n);break;}
-        case'PREFERRED_NOTIONAL':{const n=safeNum(cv,{allowZero:true});if(n!==null)setPreferredNotional(n);break;}
-        case'CASH_POSITION':{const n=safeNum(cv,{allowZero:true});if(n!==null)setCashPosition(n);break;}
-        case'MNAV':{const n=safeNum(cv);if(n!==null)setParsedMnav(n);break;}
-        case'BTC_BELOW_STH_COST':setBtcBelowSthCost(bv);break;
-        case'ETF_OUTFLOWS_PERSISTENT':setEtfOutflowsPersistent(bv);break;
-        case'MNAV_COMPRESSED':setMnavCompressed(bv);if(bv)setMnavEuphoric(false);break;
-        case'MNAV_EUPHORIC':setMnavEuphoric(bv);if(bv)setMnavCompressed(false);break;
-        case'BTC_DOMINANCE':{const n=safeNum(cv);if(n!==null)setBtcDominance(n);break;}
-        case'MSTR_SHORT_INT':{const n=safeNum(cv);if(n!==null)setMstrShortInt(n);break;}
-        case'MSTR_IV_RANK':{const n=safeNum(cv,{allowZero:true});if(n!==null)setIvRank(n);break;}
-        case'ATM_ACTIVE':setAtmActive(bv);break;
-        case'DATA_TIMESTAMP':if(val)setDataTimestamp(val);break;
-        case'CONFIDENCE':if(val)setConfidence(val.toUpperCase());break;
-        case'STALE_FIELDS':setStaleFields(val);break;
+        case'MSTR_PRICE':{const n=safeNum(cv);if(n!==null){setMstrPrice(n);applied.push(`MSTR $${n}`);}else skipped.push(key);break;}
+        case'MSTR_200MA':{const n=safeNum(cv);if(n!==null){setMa200(n);applied.push(`200MA $${n}`);}else skipped.push(key);break;}
+        case'MSTR_20D_HIGH':{const n=safeNum(cv);if(n!==null){setHigh20(n);applied.push(`20dH $${n}`);}else skipped.push(key);break;}
+        case'MSTR_20D_LOW':{const n=safeNum(cv);if(n!==null){setLow20(n);applied.push(`20dL $${n}`);}else skipped.push(key);break;}
+        case'MSTR_50D_HIGH':{const n=safeNum(cv);if(n!==null){setHigh50(n);applied.push(`50dH $${n}`);}else skipped.push(key);break;}
+        case'MSTR_50D_LOW':{const n=safeNum(cv);if(n!==null){setLow50(n);applied.push(`50dL $${n}`);}else skipped.push(key);break;}
+        case'MSTR_200D_LOW':{const n=safeNum(cv);if(n!==null){setLow200(n);applied.push(`200dL $${n}`);}else skipped.push(key);break;}
+        case'MSTR_ATR14':{const n=safeNum(cv);if(n!==null){setAtr14(n);applied.push(`ATR ${n}`);}else skipped.push(key);break;}
+        case'BTC_PRICE':{const n=safeNum(cv);if(n!==null){setBtcPrice(n);applied.push(`BTC $${n.toLocaleString()}`);}else skipped.push(key);break;}
+        case'NUPL':{const n=safeNum(cv,{allowNegative:true,allowZero:true});if(n!==null){setNupl(n);applied.push(`NUPL ${n}%`);}else skipped.push(key);break;}
+        case'MVRV':{const n=safeNum(cv);if(n!==null){setMvrv(n);applied.push(`MVRV ${n}`);}else skipped.push(key);break;}
+        case'BTC_HOLDINGS':{const n=safeNum(cv);if(n!==null){handleHoldingsChange(n);applied.push(`Holdings ${n.toLocaleString()}`);}else skipped.push(key);break;}
+        case'DILUTED_SHARES':{const n=safeNum(cv);if(n!==null){const sh=n>10000?n/1_000_000:n;handleSharesChange(sh);applied.push(`Shares ${sh}M`);}else skipped.push(key);break;}
+        case'BELOW_200MA':setBelow200ma(bv);applied.push(`200MA ${bv?'ON':'OFF'}`);break;
+        case'WEEKLY_LL':setWeeklyLowerLow(bv);applied.push(`WeeklyLL ${bv?'ON':'OFF'}`);break;
+        case'SHORTING':setFundingNegative(bv);if(bv)setDerivativesExhaustion(false);applied.push(`Shorting ${bv?'ON':'OFF'}`);break;
+        case'EXHAUSTION':setDerivativesExhaustion(bv);if(bv)setFundingNegative(false);applied.push(`Exhaustion ${bv?'ON':'OFF'}`);break;
+        case'DXY_ABOVE_110':setDxyAbove110(bv);applied.push(`DXY>110 ${bv?'ON':'OFF'}`);break;
+        case'STH_REALIZED_PRICE':{const n=safeNum(cv);if(n!==null){setSthRealizedPrice(n);applied.push(`STH cost $${n.toLocaleString()}`);}else skipped.push(key);break;}
+        case'ETF_FLOWS_5D':{const n=safeNum(cv,{allowNegative:true,allowZero:true});if(n!==null){setEtfFlows5d(n);applied.push(`ETF 5D ${n>=0?'+':''}${n}M`);}else skipped.push(key);break;}
+        case'TOTAL_DEBT':{const n=safeNum(cv,{allowZero:true});if(n!==null){setTotalDebt(n);applied.push(`Debt $${n}M`);}else skipped.push(key);break;}
+        case'PREFERRED_NOTIONAL':{const n=safeNum(cv,{allowZero:true});if(n!==null){setPreferredNotional(n);applied.push(`Pref $${n}M`);}else skipped.push(key);break;}
+        case'CASH_POSITION':{const n=safeNum(cv,{allowZero:true});if(n!==null){setCashPosition(n);applied.push(`Cash $${n}M`);}else skipped.push(key);break;}
+        case'MNAV':{const n=safeNum(cv);if(n!==null){setParsedMnav(n);applied.push(`mNAV ${n}x`);}else skipped.push(key);break;}
+        case'DXY':{const n=safeNum(cv);if(n!==null){applied.push(`DXY ${n}`);}else skipped.push(key);break;}
+        case'BTC_BELOW_STH_COST':setBtcBelowSthCost(bv);applied.push(`BTC<STH ${bv?'ON':'OFF'}`);break;
+        case'ETF_OUTFLOWS_PERSISTENT':setEtfOutflowsPersistent(bv);applied.push(`ETF out ${bv?'ON':'OFF'}`);break;
+        case'MNAV_COMPRESSED':setMnavCompressed(bv);if(bv)setMnavEuphoric(false);applied.push(`mNAV comp ${bv?'ON':'OFF'}`);break;
+        case'MNAV_EUPHORIC':setMnavEuphoric(bv);if(bv)setMnavCompressed(false);applied.push(`mNAV euph ${bv?'ON':'OFF'}`);break;
+        case'BTC_DOMINANCE':{const n=safeNum(cv);if(n!==null){setBtcDominance(n);applied.push(`BTC.D ${n}%`);}else skipped.push(key);break;}
+        case'MSTR_SHORT_INT':{const n=safeNum(cv);if(n!==null){setMstrShortInt(n);applied.push(`Short ${n}%`);}else skipped.push(key);break;}
+        case'MSTR_IV_RANK':{const n=safeNum(cv,{allowZero:true});if(n!==null){setIvRank(n);applied.push(`IV rank ${n}`);}else skipped.push(key);break;}
+        case'ATM_ACTIVE':setAtmActive(bv);applied.push(`ATM ${bv?'ON':'OFF'}`);break;
+        case'DATA_TIMESTAMP':{const d=new Date(val);if(!isNaN(d.getTime())){setDataTimestamp(val);applied.push(`Data @ ${val}`);}else skipped.push(key);break;}
+        case'CONFIDENCE':{const u=val.toUpperCase();if(u==='HIGH'||u==='MEDIUM'||u==='LOW'){setConfidence(u);applied.push(`Conf ${u}`);}else skipped.push(key);break;}
+        case'STALE_FIELDS':setStaleFields(val);applied.push(`Stale: ${val.length>30?val.slice(0,30)+'…':val}`);break;
+        default:skipped.push(key);
       }
     }
-    setLastUpdated(new Date().toISOString());
-    setPasteText('');
+    if(applied.length===0){setPasteResult({ok:false,msg:'No recognised fields. Check format — expect KEY: VALUE per line.'});}
+    else{
+      const warnings=[];
+      let parsedPrice=null,parsed20H=null,parsed20L=null,parsedMnavVal=null,parsedBtcP=null,parsedHoldings=null,parsedShares=null;
+      for(const line of lines){
+        const m2=line.match(/^([A-Za-z0-9_]+)\s*[:=]\s*(.+?)\s*$/);if(!m2)continue;
+        const k=m2[1].toUpperCase(),v=Number(m2[2].replace(/[$,%]/g,''));
+        if(k==='MSTR_PRICE'&&isFinite(v)&&v>0)parsedPrice=v;
+        if(k==='MSTR_20D_HIGH'&&isFinite(v)&&v>0)parsed20H=v;
+        if(k==='MSTR_20D_LOW'&&isFinite(v)&&v>0)parsed20L=v;
+        if(k==='MNAV'&&isFinite(v)&&v>0)parsedMnavVal=v;
+        if(k==='BTC_PRICE'&&isFinite(v)&&v>0)parsedBtcP=v;
+        if(k==='BTC_HOLDINGS'&&isFinite(v)&&v>0)parsedHoldings=v;
+        if(k==='DILUTED_SHARES'&&isFinite(v)&&v>0)parsedShares=v>10000?v/1_000_000:v;
+      }
+      if(parsed20H!==null&&parsed20L!==null&&parsed20H<parsed20L)warnings.push(`20d High ($${parsed20H}) < 20d Low ($${parsed20L}) — values transposed?`);
+      if(parsedPrice!==null&&parsed20H!==null&&parsedPrice>parsed20H*1.15)warnings.push(`MSTR price $${parsedPrice} is >15% above 20d high $${parsed20H} — plausible but verify.`);
+      if(parsedPrice!==null&&parsed20L!==null&&parsedPrice<parsed20L*0.85)warnings.push(`MSTR price $${parsedPrice} is >15% below 20d low $${parsed20L} — plausible but verify.`);
+      if(parsedMnavVal!==null&&parsedBtcP!==null&&parsedHoldings!==null&&parsedShares!==null&&parsedPrice!==null){
+        const impliedFV=(parsedHoldings*parsedBtcP)/(parsedShares*1_000_000);
+        const impliedMnav=impliedFV>0?parsedPrice/impliedFV:null;
+        if(impliedMnav!==null&&Math.abs(impliedMnav-parsedMnavVal)>0.25)warnings.push(`mNAV ${parsedMnavVal.toFixed(2)}x diverges ${Math.abs(impliedMnav-parsedMnavVal).toFixed(2)}x from quick check (${impliedMnav.toFixed(2)}x) — verify balance sheet inputs.`);
+      }
+      const warnSuffix=warnings.length>0?` ⚠ ${warnings.length} sanity warning${warnings.length>1?'s':''}: ${warnings[0]}${warnings.length>1?` (+${warnings.length-1} more)`:''}` :'';
+      setLastUpdated(new Date().toISOString());
+      setPasteResult({ok:warnings.length===0,msg:`Applied ${applied.length} field${applied.length>1?'s':''}${skipped.length?` (${skipped.length} skipped)`:''}: ${applied.slice(0,6).join(' · ')}${applied.length>6?'…':''}${warnSuffix}`,warnings});
+      setPasteText('');
+      setTimeout(()=>setPasteResult(null),warnings.length>0?12000:6000);
+    }
+  };
+
+  const addTrade=()=>{
+    const sharesNum = parseFloat(tradeShares);
+    const inputNum = parseFloat(tradePriceInput);
+    if(!sharesNum || sharesNum <= 0 || !inputNum || inputNum <= 0) return;
+
+    let finalPriceUsd = 0;
+    let totalProceedsGbp = 0;
+
+    if(tradePriceMode === 'USD') {
+      finalPriceUsd = inputNum;
+      totalProceedsGbp = (sharesNum * finalPriceUsd) / gbpUsd;
+    } else if(tradePriceMode === 'GBP_TOTAL') {
+      totalProceedsGbp = inputNum;
+      const pricePerShareGbp = totalProceedsGbp / sharesNum;
+      finalPriceUsd = pricePerShareGbp * gbpUsd;
+    } else if(tradePriceMode === 'GBP_PRICE') {
+      totalProceedsGbp = inputNum * sharesNum;
+      finalPriceUsd = inputNum * gbpUsd;
+    } else if(tradePriceMode === 'GBX') {
+      const pricePerShareGbp = inputNum / 100;
+      totalProceedsGbp = pricePerShareGbp * sharesNum;
+      finalPriceUsd = pricePerShareGbp * gbpUsd;
+    }
+
+    const trade={
+      id: Date.now(),
+      date: tradeDate,
+      type: tradeType,
+      shares: sharesNum,
+      price: parseFloat(finalPriceUsd.toFixed(2)),
+      priceGbp: parseFloat((totalProceedsGbp / sharesNum).toFixed(2)),
+      totalGbp: parseFloat(totalProceedsGbp.toFixed(2)),
+      fees: parseFloat(tradeFees)||0
+    };
+
+    const updated=[...trades, trade];
+    setTrades(updated);
+    try{localStorage.setItem('mstr:trades',JSON.stringify(updated));}catch(e){}
+
+    if(autoSyncCash) {
+      if(tradeType === 'SELL') {
+        const newCash = cashBuffer + totalProceedsGbp;
+        setCashBuffer(parseFloat(newCash.toFixed(2)));
+      } else {
+        const newCash = Math.max(0, cashBuffer - totalProceedsGbp);
+        setCashBuffer(parseFloat(newCash.toFixed(2)));
+      }
+    }
+
+    setTradeShares('');
+    setTradePriceInput('');
+    setTradeFees('');
+  };
+
+  const deleteTrade=id=>{const updated=trades.filter(t=>t.id!==id);setTrades(updated);try{localStorage.setItem('mstr:trades',JSON.stringify(updated));}catch(e){}};
+  const openPosition=(overrides={})=>{
+    const f={...positionForm,...overrides};if(!f.shares||!f.entryPrice)return;
+    const pos={id:Date.now(),openedAt:new Date().toISOString(),shares:parseFloat(f.shares),entryPrice:parseFloat(f.entryPrice),stop:f.stop?parseFloat(f.stop):null,target:f.target?parseFloat(f.target):null,tag:f.tag||'MANUAL',notes:f.notes||'',status:'OPEN'};
+    const updated=[...positions,pos];setPositions(updated);try{localStorage.setItem('mstr:positions',JSON.stringify(updated));}catch(e){}
+    setPositionForm({shares:'',entryPrice:'',stop:'',target:'',tag:'MANUAL',notes:''});
+  };
+  const closePosition=(id,exitPrice,exitFees=0)=>{
+    const pos=positions.find(p=>p.id===id);if(!pos)return;
+    const exit=parseFloat(exitPrice);if(!exit||isNaN(exit))return;
+    const updated=positions.map(p=>p.id===id?{...p,status:'CLOSED',closedAt:new Date().toISOString(),exitPrice:exit,exitFees:parseFloat(exitFees)||0}:p);
+    setPositions(updated);try{localStorage.setItem('mstr:positions',JSON.stringify(updated));}catch(e){}
+    const ct={id:Date.now(),date:new Date().toISOString().slice(0,10),type:'SELL',shares:pos.shares,price:exit,fees:parseFloat(exitFees)||0,fromPositionId:id};
+    const tu=[...trades,ct];setTrades(tu);try{localStorage.setItem('mstr:trades',JSON.stringify(tu));}catch(e){}
+  };
+  const deletePosition=id=>{const updated=positions.filter(p=>p.id!==id);setPositions(updated);try{localStorage.setItem('mstr:positions',JSON.stringify(updated));}catch(e){}};
+  const deleteSnapshot=date=>{setSnapshots(prev=>{const updated=prev.filter(s=>s.date!==date);try{localStorage.setItem('mstr:snapshots',JSON.stringify(updated));}catch(e){}return updated;});};
+
+  const buildExportPayload=()=>({version:14.12,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,cashBufferUpdated},trades,snapshots,positions,misses,regimeLog});
+
+  const exportJSON=async()=>{const text=JSON.stringify(buildExportPayload(),null,2);try{await navigator.clipboard.writeText(text);setImportResult({ok:true,msg:`Exported ${trades.length} trades, ${positions.length} positions, ${snapshots.length} snapshots.`});}catch(e){setImportResult({ok:true,msg:'Export ready below — copy manually.',payload:text});}setTimeout(()=>setImportResult(null),8000);};
+  const exportJSONFile=()=>{const text=JSON.stringify(buildExportPayload(),null,2);const blob=new Blob([text],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');const stamp=new Date().toISOString().slice(0,10);a.href=url;a.download=`mstr-cycle-${stamp}.json`;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(url),1000);setImportResult({ok:true,msg:`Downloaded mstr-cycle-${stamp}.json`});setTimeout(()=>setImportResult(null),6000);};
+  const importJSONFile=file=>{if(!file)return;const reader=new FileReader();reader.onload=e=>{setImportText(String(e.target.result||''));};reader.readAsText(file);};
+  const importJSON=()=>{
+    if(!importText.trim())return;
+    try{
+      const p=JSON.parse(importText);
+      if(p.settings){const s=p.settings;
+        if(s.mstrPrice!==undefined)setMstrPrice(s.mstrPrice);if(s.btcPrice!==undefined)setBtcPrice(s.btcPrice);if(s.ma200!==undefined)setMa200(s.ma200);if(s.lastUpdated!==undefined)setLastUpdated(s.lastUpdated);if(s.high20!==undefined)setHigh20(s.high20);if(s.low20!==undefined)setLow20(s.low20);if(s.high50!==undefined)setHigh50(s.high50);if(s.low50!==undefined)setLow50(s.low50);if(s.low200!==undefined)setLow200(s.low200);if(s.atr14!==undefined)setAtr14(s.atr14);if(s.nupl!==undefined)setNupl(s.nupl);if(s.mvrv!==undefined)setMvrv(s.mvrv);if(s.fundingNegative!==undefined)setFundingNegative(s.fundingNegative);if(s.derivativesExhaustion!==undefined)setDerivativesExhaustion(s.derivativesExhaustion);if(s.below200ma!==undefined)setBelow200ma(s.below200ma);if(s.weeklyLowerLow!==undefined)setWeeklyLowerLow(s.weeklyLowerLow);if(s.dxyAbove110!==undefined)setDxyAbove110(s.dxyAbove110);if(s.btcHoldings!==undefined)setBtcHoldings(s.btcHoldings);if(s.dilutedShares!==undefined)setDilutedShares(s.dilutedShares);if(s.corporateBaseUpdated!==undefined)setCorporateBaseUpdated(s.corporateBaseUpdated);if(s.startingShares!==undefined)setStartingShares(s.startingShares);if(s.cashBuffer!==undefined)setCashBuffer(s.cashBuffer);if(s.gbpUsd!==undefined)setGbpUsd(s.gbpUsd);if(s.levelsAuto!==undefined)setLevelsAuto(s.levelsAuto);if(s.manualSellLow!==undefined)setManualSellLow(s.manualSellLow);if(s.manualSellHigh!==undefined)setManualSellHigh(s.manualSellHigh);if(s.manualBuyLow!==undefined)setManualBuyLow(s.manualBuyLow);if(s.manualBuyHigh!==undefined)setManualBuyHigh(s.manualBuyHigh);if(s.aggressionStyle!==undefined)setAggressionStyle(s.aggressionStyle);if(s.parsedMnav!==undefined)setParsedMnav(s.parsedMnav);if(s.totalDebt!==undefined)setTotalDebt(s.totalDebt);if(s.preferredNotional!==undefined)setPreferredNotional(s.preferredNotional);if(s.cashPosition!==undefined)setCashPosition(s.cashPosition);if(s.sthRealizedPrice!==undefined)setSthRealizedPrice(s.sthRealizedPrice);if(s.btcBelowSthCost!==undefined)setBtcBelowSthCost(s.btcBelowSthCost);if(s.etfFlows5d!==undefined)setEtfFlows5d(s.etfFlows5d);if(s.etfOutflowsPersistent!==undefined)setEtfOutflowsPersistent(s.etfOutflowsPersistent);if(s.mnavCompressed!==undefined)setMnavCompressed(s.mnavCompressed);if(s.mnavEuphoric!==undefined)setMnavEuphoric(s.mnavEuphoric);if(s.dataTimestamp!==undefined)setDataTimestamp(s.dataTimestamp);if(s.confidence!==undefined)setConfidence(s.confidence);if(s.staleFields!==undefined)setStaleFields(s.staleFields);if(s.btcDominance!==undefined)setBtcDominance(s.btcDominance);if(s.mstrShortInt!==undefined)setMstrShortInt(s.mstrShortInt);if(s.atmActive!==undefined)setAtmActive(s.atmActive);if(s.ivRank!==undefined)setIvRank(s.ivRank);if(s.projBearBtc!==undefined)setProjBearBtc(s.projBearBtc);if(s.projBaseBtc!==undefined)setProjBaseBtc(s.projBaseBtc);if(s.projBullBtc!==undefined)setProjBullBtc(s.projBullBtc);if(s.projBearMnav!==undefined)setProjBearMnav(s.projBearMnav);if(s.projBaseMnav!==undefined)setProjBaseMnav(s.projBaseMnav);if(s.projBullMnav!==undefined)setProjBullMnav(s.projBullMnav);if(s.projShares!==undefined)setProjShares(s.projShares);
+      }
+      if(Array.isArray(p.trades)){setTrades(p.trades);try{localStorage.setItem('mstr:trades',JSON.stringify(p.trades));}catch(e){}}
+      if(Array.isArray(p.snapshots)){setSnapshots(p.snapshots);try{localStorage.setItem('mstr:snapshots',JSON.stringify(p.snapshots));}catch(e){}}
+      if(Array.isArray(p.positions)){setPositions(p.positions);try{localStorage.setItem('mstr:positions',JSON.stringify(p.positions));}catch(e){}}
+      if(Array.isArray(p.misses)){setMisses(p.misses);try{localStorage.setItem('mstr:misses',JSON.stringify(p.misses));}catch(e){}}
+      if(Array.isArray(p.regimeLog)){setRegimeLog(p.regimeLog);try{localStorage.setItem('mstr:regimeLog',JSON.stringify(p.regimeLog));}catch(e){}}
+      setImportText('');setImportResult({ok:true,msg:`Imported: ${p.trades?.length??0} trades, ${p.positions?.length??0} positions, ${p.snapshots?.length??0} snapshots.`});
+    }catch(e){setImportResult({ok:false,msg:`Import failed: ${e.message}`});}
+    setTimeout(()=>setImportResult(null),8000);
   };
 
   const C={bg:'#0a0806',panel:'#14100c',border:'#2a2520',text:'#d4c8b8',dim:'#a89580',mute:'#8a7a65',faint:'#5a5048',gold:'#d4a017',red:'#c73e1d',green:'#2d8659',hi:'#e8dcc8'};
   const S='Georgia,"Times New Roman",serif';
+  const staleColor=!daysSinceBaseUpdate&&daysSinceBaseUpdate!==0?C.faint:daysSinceBaseUpdate>60?C.red:daysSinceBaseUpdate>30?C.gold:C.mute;
+  const mnt=m=>{if(!m||m<=0)return C.faint;if(m<1.05)return C.green;if(m<1.80)return C.gold;return C.red;};
+  const mnl=m=>{if(!m||m<=0)return'—';if(m<1.05)return'sub-NAV — capitulation zone';if(m<1.20)return'compressed — premium-engine stall';if(m<1.80)return'healthy premium';if(m<2.50)return'elevated premium';return'euphoria zone';};
 
   const SH=({children})=><div style={{fontSize:'11px',letterSpacing:'0.2em',color:C.dim,textTransform:'uppercase',marginBottom:'16px',borderBottom:`1px solid ${C.border}`,paddingBottom:'8px',fontFamily:S}}>{children}</div>;
   const NB=({id,label,secondary})=><button onClick={()=>setView(id)} style={{background:view===id?C.panel:'transparent',color:view===id?C.gold:secondary?C.mute:C.dim,border:`1px solid ${view===id?C.gold:C.border}`,padding:secondary?'5px 10px':'8px 14px',fontFamily:S,fontSize:secondary?'10px':'11px',letterSpacing:'0.1em',textTransform:'uppercase',cursor:'pointer',flex:1,fontWeight:view===id?600:400,borderRadius:'2px'}}>{label}</button>;
 
+  const ST=({value,onChange,label,helperUrl,bottomTone})=>(
+    <div style={{marginBottom:'8px'}}>
+      <div onClick={()=>onChange(!value)} style={{display:'flex',alignItems:'center',padding:'10px 14px',background:value?(bottomTone?'#0f1a13':'#2a1f1a'):'#0f0d0a',border:`1px solid ${value?(bottomTone?C.green:C.red):C.border}`,borderRadius:'4px',cursor:'pointer'}}>
+        <div style={{width:'14px',height:'14px',borderRadius:'2px',border:`2px solid ${value?(bottomTone?C.green:C.red):C.faint}`,background:value?(bottomTone?C.green:C.red):'transparent',marginRight:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',color:'#000',flexShrink:0}}>{value&&'✓'}</div>
+        <span style={{color:C.text,fontSize:'13px',fontFamily:S,flex:1}}>{label}</span>
+      </div>
+      {helperUrl&&<div style={{display:'flex',justifyContent:'flex-start',marginTop:'4px',paddingLeft:'14px',fontSize:'10px'}}><a href={helperUrl} target="_blank" rel="noopener noreferrer" style={{color:C.gold,textDecoration:'none',letterSpacing:'0.05em'}}>check →</a></div>}
+    </div>
+  );
+
+  const NI=({value,onChange,step,label,suffix='',precision=0,min,max})=>{
+    const[ev,sev]=useState(String(value));
+    const[foc,sfoc]=useState(false);
+    useEffect(()=>{if(!foc)sev(String(value));},[value,foc]);
+    const commit=raw=>{if(raw===''||raw==='-'||raw==='.'||raw==='-.'){onChange(0);sev('0');return;}const n=Number(raw.replace(/^(-?)0+(\d)/,'$1$2'));if(!Number.isNaN(n)){let b=n;if(min!==undefined)b=Math.max(min,b);if(max!==undefined)b=Math.min(max,b);const f=Number(b.toFixed(precision));onChange(f);sev(String(f));}else sev(String(value));};
+    const adj=d=>{let n=Number(value)+d;if(min!==undefined)n=Math.max(min,n);if(max!==undefined)n=Math.min(max,n);const f=Number(n.toFixed(precision));onChange(f);sev(String(f));};
+    return(
+      <div style={{marginBottom:'14px',minWidth:0}}>
+        <div style={{display:'flex',justifyContent:'space-between',marginBottom:'6px',alignItems:'center'}}>
+          <span style={{color:C.dim,fontSize:'11px',letterSpacing:'0.08em',textTransform:'uppercase',fontFamily:S}}>{label}</span>
+          {suffix&&<span style={{color:C.mute,fontSize:'10px'}}>{suffix.trim()}</span>}
+        </div>
+        <div style={{display:'flex',gap:'6px',alignItems:'stretch',minWidth:0}}>
+          <button onClick={()=>adj(-step)} style={{width:'40px',flexShrink:0,background:C.bg,border:`1px solid ${C.border}`,color:C.gold,fontFamily:S,fontSize:'16px',cursor:'pointer'}}>−</button>
+          <input type="text" inputMode="decimal" value={ev}
+            onFocus={e=>{sfoc(true);e.target.select();}} onBlur={()=>{sfoc(false);commit(ev);}}
+            onChange={e=>{const r=e.target.value;if(/^-?\d*\.?\d*$/.test(r))sev(r);}} onKeyDown={e=>{if(e.key==='Enter')e.target.blur();}}
+            style={{flex:1,minWidth:0,background:C.bg,border:`1px solid ${C.border}`,color:C.gold,padding:'8px 12px',fontFamily:S,fontSize:'15px',fontWeight:600,textAlign:'center'}}/>
+          <button onClick={()=>adj(step)} style={{width:'40px',flexShrink:0,background:C.bg,border:`1px solid ${C.border}`,color:C.gold,fontFamily:S,fontSize:'16px',cursor:'pointer'}}>+</button>
+        </div>
+      </div>
+    );
+  };
+
+  const EquityCurve=({snapshots,startingShares,mstrPrice,gbpUsd})=>{
+    const points=useMemo(()=>snapshots.filter(s=>s.mstrPrice&&(s.currentShares!==undefined||startingShares>0)).map(s=>{const sh=s.currentShares!==undefined?s.currentShares:startingShares;const cash=s.cashBufferGBP||0;const rate=s.gbpUsd||gbpUsd;return{date:s.date,portfolioGBP:(sh*s.mstrPrice/rate)+cash,mstrPrice:s.mstrPrice,shares:sh};}).sort((a,b)=>a.date.localeCompare(b.date)),[snapshots,startingShares,gbpUsd]);
+    if(points.length<3)return null;
+    const maxVal=Math.max(...points.map(p=>p.portfolioGBP)),minVal=Math.min(...points.map(p=>p.portfolioGBP)),range=maxVal-minVal||1;
+    const totalReturn=((points[points.length-1].portfolioGBP-points[0].portfolioGBP)/points[0].portfolioGBP)*100;
+    return(
+      <div style={{marginTop:'16px',paddingTop:'16px',borderTop:`1px solid ${C.border}`}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'10px'}}>
+          <span style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase'}}>Portfolio equity curve ({points.length} snapshots)</span>
+          <span style={{fontSize:'12px',color:totalReturn>=0?C.green:C.red,fontWeight:600}}>{totalReturn>=0?'+':''}{totalReturn.toFixed(1)}% total</span>
+        </div>
+        <div style={{display:'flex',alignItems:'flex-end',gap:'3px',height:'48px'}}>
+          {points.map((p,i)=>{
+            const hp=range>0?((p.portfolioGBP-minVal)/range)*100:50,isLast=i===points.length-1;
+            const prevVal=i>0?points[i-1].portfolioGBP:p.portfolioGBP;
+            const bc=isLast?C.gold:p.portfolioGBP>=prevVal?C.green:C.red;
+            return<div key={p.date} style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'flex-end',height:'100%'}} title={`${new Date(p.date).toLocaleDateString()}: £${Math.round(p.portfolioGBP).toLocaleString()} · ${p.shares.toFixed(0)} sh @ $${p.mstrPrice}`}><div style={{background:bc,width:'100%',height:`${Math.max(8,hp)}%`,opacity:isLast?1:0.7,borderRadius:'1px 1px 0 0'}}/></div>;
+          })}
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',marginTop:'4px',fontSize:'9px',color:C.faint}}>
+          <span>{new Date(points[0].date).toLocaleDateString()}</span>
+          <span style={{color:C.mute}}>hover bars for details</span>
+          <span>{new Date(points[points.length-1].date).toLocaleDateString()}</span>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',marginTop:'8px',fontSize:'10px'}}>
+          <span style={{color:C.faint}}>Low: £{Math.round(minVal).toLocaleString()}</span>
+          <span style={{color:C.faint}}>High: £{Math.round(maxVal).toLocaleString()}</span>
+        </div>
+      </div>
+    );
+  };
+
   return(
+    <>
+    <ZoneHitPrompt hit={zoneHitPrompt?.hit} onActed={handleZoneActed} onMissed={handleZoneMissed} onDismiss={handleZoneDismiss}/>
     <div style={{minHeight:'100vh',background:`linear-gradient(180deg,${C.bg} 0%,${C.panel} 100%)`,padding:'24px 16px',fontFamily:S,color:C.text}}>
     <div style={{maxWidth:'720px',margin:'0 auto'}}>
 
     {/* HEADER */}
     <div style={{marginBottom:'24px',borderBottom:`1px solid ${C.border}`,paddingBottom:'20px'}}>
-      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.12 · Full Engine</div>
-      <h1 style={{fontSize:'26px',fontWeight:400,color:C.hi,margin:0,fontStyle:'italic'}}>MSTR Accumulator</h1>
+      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.12 · full engine</div>
+      <h1 style={{fontSize:'26px',fontWeight:400,color:C.hi,margin:0,fontStyle:'italic'}}>MSTR Rotation</h1>
+      <h2 style={{fontSize:'14px',fontWeight:400,color:C.dim,margin:'4px 0 12px 0',letterSpacing:'0.05em'}}>Rotate · Hoard · Deploy</h2>
       <div style={{display:'flex',gap:'16px',flexWrap:'wrap',fontSize:'12px',marginTop:'12px',alignItems:'center'}}>
         <div><span style={{color:C.mute}}>BTC </span><span style={{color:C.gold}}>${btcPrice.toLocaleString()}</span></div>
         <div><span style={{color:C.mute}}>MSTR </span><span style={{color:C.gold}}>${mstrPrice.toFixed(2)}</span></div>
-        <div><span style={{color:C.mute}}>mNAV </span><span style={{color:C.green}}>{mNAV.toFixed(2)}x</span></div>
-        <div><span style={{color:C.mute}}>SIPP Cash </span><span style={{color:C.gold}}>£{cashBuffer.toLocaleString()}</span></div>
+        <div><span style={{color:C.mute}}>200MA </span><span style={{color:C.gold}}>{ma200?`$${ma200.toFixed(2)}`:'—'}</span></div>
+        <div style={{color:C.mute}}>mNAV{' '}<span style={{color:mnt(headerMnavInfo.value)}}>{headerMnavInfo.value?`${headerMnavInfo.value.toFixed(2)}x`:'—'}</span>
+          {headerMnavInfo.overridden&&<span title={`Pasted mNAV was ${headerMnavInfo.parsedWas?.toFixed(2)}x — overridden with live recomputed value`} style={{marginLeft:'4px',fontSize:'9px',color:C.gold,border:`1px solid ${C.gold}`,padding:'1px 4px',borderRadius:'2px',letterSpacing:'0.06em',cursor:'help',verticalAlign:'middle'}}>↻ live</span>}
+        </div>
+        {btcDominance!==null&&<div style={{color:C.mute}}>BTC.D <span style={{color:btcDominance<50?C.red:btcDominance>60?C.green:C.gold}}>{btcDominance.toFixed(1)}%</span></div>}
+        {ivRank!==null&&<div style={{color:C.mute}}>IV Rank <span style={{color:ivRank>75?C.red:ivRank>50?C.gold:C.green,fontWeight:ivRank>75?700:400}}>{ivRank}{ivRank>75?' ⚡':''}</span></div>}
+      </div>
+      <div style={{fontSize:'9px',color:C.faint,marginTop:'6px',letterSpacing:'0.05em',display:'flex',gap:'10px',flexWrap:'wrap'}}>
+        <span>Prompt-driven updates. Paste prompt response below to refresh.</span>
+        {freshness.hours!==null&&<span style={{color:freshness.tier==='red'?C.red:freshness.tier==='amber'?C.gold:C.green,fontWeight:600}}>· data {freshness.hours<1?`${(freshness.hours*60).toFixed(0)}m`:`${freshness.hours.toFixed(0)}h`} old</span>}
+        {confidence&&<span style={{color:confidence==='LOW'?C.red:confidence==='MEDIUM'?C.gold:C.green}}>· conf {confidence}</span>}
       </div>
     </div>
 
-    {/* NAVIGATION */}
+    {/* NAV */}
     <div style={{marginBottom:'20px'}}>
       <div style={{display:'flex',gap:'6px',marginBottom:'6px'}}>
-        <NB id="dashboard" label="Dashboard"/><NB id="journal" label={`Trade Tracker (${trades.length})`}/><NB id="backup" label="Backup"/>
+        <NB id="dashboard" label="Dashboard"/><NB id="positions" label={`Open · ${positions.filter(p=>p.status==='OPEN').length}`}/><NB id="journal" label={`Journal · ${trades.length}`}/><NB id="project" label="Project"/>
+      </div>
+      <div style={{display:'flex',gap:'6px'}}>
+        <NB id="snapshots" label={`Log · ${snapshots.length}`} secondary/><NB id="backup" label="Backup" secondary/>
       </div>
     </div>
 
-    {/* DASHBOARD TAB */}
     {view==='dashboard'&&(<>
-      {/* MODE REGIME CARD */}
-      <div style={{background:mode==='HOARD'?'#1a0f0d':mode==='DEPLOY'?'#0f1a13':'#1a1611',border:`1px solid ${mode==='HOARD'?C.red:mode==='DEPLOY'?C.green:C.gold}`,padding:'20px',marginBottom:'20px'}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'12px'}}>
-          <div>
-            <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute}}>Active Regime</div>
-            <div style={{fontSize:'22px',color:mode==='HOARD'?C.red:mode==='DEPLOY'?C.green:C.gold,fontWeight:600}}>{mode === 'HOARD' ? 'CASH HOARD' : mode === 'DEPLOY' ? 'DEPLOY CASH' : 'NORMAL ROTATION'}</div>
+      {/* STALENESS BANNER */}
+      {(freshness.tier==='amber'||freshness.tier==='red'||confidence==='LOW'||(staleFields&&staleFields!=='NONE'))&&(
+        <div style={{background:freshness.tier==='red'||confidence==='LOW'?'#1a0f0d':'#1a1611',border:`2px solid ${freshness.tier==='red'||confidence==='LOW'?C.red:C.gold}`,padding:'14px 16px',marginBottom:'20px',borderRadius:'3px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'6px'}}>
+            <span style={{fontSize:'18px',lineHeight:1}}>{freshness.tier==='red'||confidence==='LOW'?'🚨':'⚠'}</span>
+            <span style={{color:freshness.tier==='red'||confidence==='LOW'?C.red:C.gold,fontSize:'12px',fontWeight:700,letterSpacing:'0.15em',textTransform:'uppercase'}}>
+              {freshness.tier==='red'?'Running on cached indicators — regime update required':confidence==='LOW'?'Low-confidence data — verify before trading':'Data is aging — consider refreshing'}
+            </span>
           </div>
-          <div style={{textAlign:'right'}}>
-            <div style={{fontSize:'9px',color:C.mute}}>MSTR PRICE</div>
-            <div style={{fontSize:'24px',color:C.hi,fontWeight:600}}>${mstrPrice.toFixed(2)}</div>
+          <div style={{fontSize:'11px',color:C.dim,lineHeight:1.5,paddingLeft:'28px'}}>
+            {freshness.hours!==null&&<div>Source data is {freshness.hours<1?`${(freshness.hours*60).toFixed(0)} minutes`:`${freshness.hours.toFixed(1)} hours`} old ({freshness.source==='data-timestamp'?'LLM-asserted':'paste-time fallback'}).</div>}
+            {confidence&&<div style={{marginTop:'2px'}}>LLM confidence: <span style={{color:confidence==='LOW'?C.red:confidence==='MEDIUM'?C.gold:C.green,fontWeight:600}}>{confidence}</span></div>}
+            {staleFields&&staleFields!=='NONE'&&<div style={{marginTop:'2px'}}>Stale fields: <span style={{color:C.red,fontStyle:'italic'}}>{staleFields}</span></div>}
           </div>
         </div>
-        <div style={{fontSize:'12px',color:C.dim,lineHeight:1.5}}>
-          {mode==='HOARD'?'Sell at technical resistance. Build cash buffer. Do not execute buy backs until signals improve.':mode==='DEPLOY'?'All-in cash deployment zone. Accumulate weakness.':'Rotate positions around resistance/support bands.'}
-        </div>
-      </div>
+      )}
 
-      {/* PORTFOLIO OVERVIEW */}
+      {/* MODE CARD */}
+      {(()=>{const modeStale=freshness.tier==='red'||confidence==='LOW';return(
+      <div style={{background:modeStale?'#12100e':cfg.bg,border:`1px solid ${modeStale?C.faint:cfg.color}`,padding:'20px',marginBottom:'20px',opacity:modeStale?0.82:1,position:'relative'}}>
+        {modeStale&&<div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'14px',padding:'8px 10px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px'}}>
+          <span style={{fontSize:'13px',lineHeight:1}}>🚨</span>
+          <span style={{fontSize:'10px',color:C.red,fontWeight:700,letterSpacing:'0.1em',textTransform:'uppercase',lineHeight:1.4}}>Mode computed on {freshness.tier==='red'?'stale':'low-confidence'} data — verify before acting</span>
+        </div>}
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'18px',gap:'16px',flexWrap:'wrap'}}>
+          <div style={{flex:'1 1 auto',minWidth:0}}>
+            <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:modeStale?C.mute:cfg.color,marginBottom:'6px'}}>Active mode{modeStale&&<span style={{color:C.red,marginLeft:'6px',fontWeight:700}}>· STALE</span>}</div>
+            <div style={{fontSize:'20px',color:modeStale?C.dim:cfg.color,fontWeight:600,letterSpacing:'0.02em',lineHeight:1.1}}>{cfg.label}</div>
+          </div>
+          <div style={{flex:'0 0 auto',textAlign:'right'}}>
+            <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginBottom:'6px'}}>MSTR</div>
+            <div style={{fontSize:'28px',color:priceRange?.tone||C.hi,fontWeight:600,letterSpacing:'-0.01em',lineHeight:1}}>${mstrPrice.toFixed(2)}</div>
+            {priceRange?.verdict&&<div style={{fontSize:'9px',letterSpacing:'0.18em',textTransform:'uppercase',color:priceRange.tone,marginTop:'6px',fontWeight:600}}>{priceRange.verdict}</div>}
+          </div>
+        </div>
+
+        {priceRange?.pct!==null&&priceRange?.pct!==undefined&&mode==='ROTATE'&&(
+          <div style={{marginBottom:'18px'}}>
+            <div style={{position:'relative',height:'6px',background:'#0a0806',borderRadius:'3px',overflow:'hidden',border:`1px solid ${C.border}`}}>
+              <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${((priceRange.buyHigh-priceRange.lo)/(priceRange.hi-priceRange.lo))*100}%`,background:'rgba(45,134,89,0.25)'}}/>
+              <div style={{position:'absolute',right:0,top:0,bottom:0,width:`${((priceRange.hi-priceRange.sellLow)/(priceRange.hi-priceRange.lo))*100}%`,background:'rgba(199,62,29,0.25)'}}/>
+              <div style={{position:'absolute',left:`${priceRange.pct*100}%`,top:'-3px',bottom:'-3px',width:'2px',background:priceRange.tone,boxShadow:`0 0 6px ${priceRange.tone}`}}/>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginTop:'4px'}}>
+              <span>${priceRange.lo.toFixed(0)}</span><span style={{color:C.faint}}>Buy band · Sell band</span><span>${priceRange.hi.toFixed(0)}</span>
+            </div>
+          </div>
+        )}
+
+        <div style={{fontSize:'13px',color:C.text,lineHeight:1.55,marginBottom:'18px'}}>{cfg.action}</div>
+
+        {mode==='HOARD'&&(()=>{
+          const pct=Math.min(100,portfolio.cashPct);
+          const met=pct>=HOARD_SELL_CEILING_PCT;
+          const barColor=met?C.green:pct>20?C.gold:C.red;
+          const cashNeededGBP=met?0:Math.max(0,((HOARD_SELL_CEILING_PCT/100)*portfolio.totalGBP)-cashBuffer);
+          return(
+            <div style={{marginBottom:'16px',padding:'12px 14px',background:'#0f0d0a',border:`1px solid ${met?C.green:C.border}`,borderRadius:'3px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'8px'}}>
+                <span style={{fontSize:'10px',color:met?C.green:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',fontWeight:met?700:400}}>
+                  {met?'● Cash target met — sell throttle active':'Cash hoard progress'}
+                </span>
+                <span style={{fontSize:'13px',color:barColor,fontWeight:700}}>{pct.toFixed(1)}% / {HOARD_SELL_CEILING_PCT}%</span>
+              </div>
+              <div style={{position:'relative',height:'6px',background:'#1a1611',borderRadius:'3px',overflow:'hidden',marginBottom:'6px'}}>
+                <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${Math.min(100,(HOARD_SELL_CEILING_PCT/100)*100)}%`,background:'rgba(212,160,23,0.12)',borderRight:`1px dashed ${C.gold}`}}/>
+                <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${pct}%`,background:barColor,transition:'width 0.4s ease',borderRadius:'3px'}}/>
+              </div>
+              {met?(
+                <div style={{fontSize:'10px',color:C.green,lineHeight:1.5}}>
+                  HOARD objective achieved. Sell trigger suspended — hold position and wait for DEPLOY conditions or regime change.
+                </div>
+              ):(
+                <div style={{fontSize:'10px',color:C.dim,lineHeight:1.5}}>
+                  {cashNeededGBP>0?`≈ £${Math.round(cashNeededGBP).toLocaleString()} more cash needed to reach ${HOARD_SELL_CEILING_PCT}% target. `:''}
+                  Sell at resistance to build buffer. Once target met, sell throttle activates.
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {deployImminent&&<div style={{marginBottom:'14px',padding:'12px 14px',background:'#111a12',border:`1px solid ${C.green}`,borderRadius:'3px'}}><div style={{color:C.green,fontSize:'12px',fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'4px'}}>● DEPLOY approaching</div><div style={{color:C.dim,fontSize:'11px',lineHeight:1.55}}>Bottom score is <span style={{color:C.green,fontWeight:600}}>{bottomScore}/20</span> — {mstrPrice<dynamicCeiling?<>{DEPLOY_SCORE_MIN-bottomScore} more point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} needed to flip to DEPLOY.</>:<>{DEPLOY_SCORE_MIN-bottomScore} point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} and a break below ${dynamicCeiling} will flip to DEPLOY.</>}</div></div>}
+        {ivRank!==null&&ivRank>75&&bearScore>=6&&<div style={{marginBottom:'14px',padding:'10px 12px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px',fontSize:'11px',color:C.red,lineHeight:1.5}}>⚡ IV Rank {ivRank} — peak options speculation zone. +1 bear signal. Premium collapse risk elevated.</div>}
+        {deploySuppressed&&<div style={{fontSize:'11px',color:C.gold,marginBottom:'14px',padding:'10px 12px',background:'#1a1611',border:`1px dashed ${C.gold}`,borderRadius:'3px'}}>⚠ Bottom score at deploy threshold, but MSTR still above ${dynamicCeiling}{sthMstrFloor!==null?` (STH floor $${sthMstrFloor.toFixed(2)} × 1.10)`:''}. Holding HOARD.</div>}
+        {levelsAuto&&!technicals&&<div style={{fontSize:'11px',color:C.red,marginBottom:'14px',padding:'10px 12px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px'}}>⚠ Auto-levels unavailable — paste a prompt response below, or switch to manual override.</div>}
+        {mode==='DEPLOY'&&levelsAuto&&dynamicLevels&&<div style={{marginBottom:'14px',padding:'8px 12px',background:'#0d1510',border:`1px dashed ${C.green}`,borderRadius:'3px',fontSize:'10px',color:C.mute,lineHeight:1.5}}>
+          {dynamicLevels.deploy.anchorMode==='sth'?<span>Ladder anchored to <span style={{color:C.green,fontWeight:600}}>STH realized price floor</span> — ${sthMstrFloor?.toFixed(2)} MSTR equivalent.</span>:dynamicLevels.deploy.anchorMode==='200ma'?<span>Ladder anchored to <span style={{color:C.gold}}>200-day MA</span>.</span>:<span>Ladder anchored to current price steps.</span>}
+        </div>}
+
+        {bandHits.length>0&&(()=>{
+          const sh=bandHits.filter(h=>h.side==='SELL'),bh=bandHits.filter(h=>h.side==='BUY');
+          const sellVisible=sh.length>0&&!hoardSellThrottled;
+          const sellThrottledVisible=sh.length>0&&hoardSellThrottled;
+          return(<div style={{display:'grid',gridTemplateColumns:(sellVisible||sellThrottledVisible)&&bh.length?'1fr 1fr':'1fr',gap:'10px',marginBottom:'18px'}}>
+            {sellVisible&&<div style={{background:'rgba(199,62,29,0.08)',border:`1px solid ${C.red}`,padding:'12px',borderRadius:'3px'}}>
+              <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.red,marginBottom:'8px',fontWeight:600}}>● Sell trigger live</div>
+              {sh.map(h=><div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px'}}>
+                <div style={{fontSize:'11px',color:C.text}}><div style={{fontSize:'12px',fontWeight:600}}>{h.label}</div><div style={{fontSize:'11px',color:C.dim}}>@ {h.zone}</div></div>
+                <button onClick={()=>{setView('positions');setPositionForm(pf=>({...pf,entryPrice:String(h.price),tag:h.tag}));}} style={{background:C.red,border:'none',color:'#fff',padding:'6px 12px',fontFamily:S,fontSize:'10px',letterSpacing:'0.12em',fontWeight:600,cursor:'pointer',borderRadius:'2px'}}>SELL</button>
+              </div>)}
+            </div>}
+            {sellThrottledVisible&&<div style={{background:'#0f0d0a',border:`1px solid ${C.green}`,padding:'12px',borderRadius:'3px'}}>
+              <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.green,marginBottom:'8px',fontWeight:600}}>● Sell throttle active</div>
+              {sh.map(h=><div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px',gap:'8px'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:'12px',fontWeight:600,color:C.dim}}>{h.label}</div>
+                  <div style={{fontSize:'11px',color:C.faint}}>@ {h.zone}</div>
+                </div>
+                <div style={{background:'#0d120f',border:`1px solid ${C.green}`,color:C.green,padding:'5px 9px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',fontWeight:700,borderRadius:'2px',textAlign:'center',whiteSpace:'nowrap',lineHeight:1.3}}>
+                  TARGET MET<br/>HOLD
+                </div>
+              </div>)}
+              <div style={{marginTop:'8px',fontSize:'9px',color:C.green,lineHeight:1.5}}>
+                Cash ≥{HOARD_SELL_CEILING_PCT}% — objective met. No further selling required until regime changes or cash drops below target.
+              </div>
+            </div>}
+            {bh.length>0&&(()=>{
+              const buyGateFailed=mode==='HOARD'&&portfolio.cashPct<HOARD_CASH_MIN_PCT;
+              if(buyGateFailed){
+                return(<div style={{background:'#111318',border:'1px solid #2a3040',padding:'12px',borderRadius:'3px'}}>
+                  <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:'#7a8aaa',marginBottom:'8px',fontWeight:600}}>● At target · buy suspended</div>
+                  {bh.map(h=><div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px',gap:'8px'}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:'12px',fontWeight:600,color:'#a0aac0'}}>{h.label}</div>
+                      <div style={{fontSize:'11px',color:'#5a6478'}}>@ {h.zone} · now ${h.price.toFixed(2)}</div>
+                    </div>
+                    <div style={{background:'#1c2030',border:'1px solid #2a3040',color:'#c8b84a',padding:'6px 10px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',fontWeight:700,borderRadius:'2px',textAlign:'center',whiteSpace:'nowrap',lineHeight:1.3}}>
+                      AT TARGET<br/>LIQUIDITY RESTRICTED
+                    </div>
+                  </div>)}
+                  <div style={{marginTop:'10px',padding:'7px 10px',background:'#0d1018',border:'1px dashed #2a3040',borderRadius:'3px',fontSize:'9px',color:'#7a8aaa',lineHeight:1.5}}>
+                    ⛔ CASH HOARD regime requires ≥{HOARD_CASH_MIN_PCT}% cash. Current: <span style={{color:'#c8b84a',fontWeight:600}}>{portfolio.cashPct.toFixed(1)}%</span>. Executable buy suspended until cash buffer is restored.
+                  </div>
+                </div>);
+              }
+              return(<div style={{background:'rgba(45,134,89,0.08)',border:`1px solid ${C.green}`,padding:'12px',borderRadius:'3px'}}>
+                <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.green,marginBottom:'8px',fontWeight:600}}>● Buy trigger live</div>
+                {bh.map(h=><div key={h.tag} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'4px'}}>
+                  <div style={{fontSize:'11px',color:C.text}}><div style={{fontSize:'12px',fontWeight:600}}>{h.label}</div><div style={{fontSize:'11px',color:C.dim}}>@ {h.zone}</div></div>
+                  <button onClick={()=>{setView('positions');setPositionForm(pf=>({...pf,entryPrice:String(h.price),tag:h.tag}));}} style={{background:C.green,border:'none',color:'#fff',padding:'6px 12px',fontFamily:S,fontSize:'10px',letterSpacing:'0.12em',fontWeight:600,cursor:'pointer',borderRadius:'2px'}}>BUY</button>
+                </div>)}
+              </div>);
+            })()}
+          </div>);
+        })()}
+
+        <div style={{paddingTop:'16px',borderTop:`1px solid ${C.border}`}}>
+          <div className="g-auto-3" style={{gap:'14px'}}>
+            <div>
+              <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginBottom:'6px'}}>Sell zone</div>
+              {hoardSellThrottled
+                ? <div style={{color:C.green,fontWeight:600,fontSize:'13px'}}>Throttled</div>
+                : <div style={{color:C.hi,fontWeight:600,fontSize:'13px'}}>{currentLevels.sell}</div>
+              }
+              {!hoardSellThrottled&&(mode==='ROTATE'||mode==='HOARD')&&alertLevels[mode.toLowerCase()].sellAlert!=null&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500}}>Alert ${alertLevels[mode.toLowerCase()].sellAlert.toFixed(2)}</div>}
+              {hoardSellThrottled&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.green,marginTop:'6px',fontWeight:500,lineHeight:1.5}}>Cash ≥{HOARD_SELL_CEILING_PCT}%<br/>Sell suspended</div>}
+            </div>
+            <div>
+              <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginBottom:'6px'}}>Buy zone</div>
+              <div style={{color:C.hi,fontWeight:600,fontSize:mode==='DEPLOY'?'10px':'13px',lineHeight:1.3}}>{currentLevels.buy}</div>
+              {mode==='ROTATE'&&alertLevels.rotate.buyAlert!=null&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500}}>Alert ${alertLevels.rotate.buyAlert.toFixed(2)}</div>}
+              {mode==='HOARD'&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500,lineHeight:1.5}}>Alert ${alertLevels.hoard.buyAlert.toFixed(2)}{alertLevels.hoard.buyDeepAlert!=null&&<><br/>+ ${alertLevels.hoard.buyDeepAlert.toFixed(2)} deep</>}</div>}
+              {mode==='DEPLOY'&&alertLevels.deploy.ladder.length>0&&<div style={{fontSize:'9px',letterSpacing:'0.12em',textTransform:'uppercase',color:C.gold,marginTop:'6px',fontWeight:500,lineHeight:1.5}}>Set {alertLevels.deploy.ladder.length} alerts:<br/>{alertLevels.deploy.ladder.map(l=>`$${l.toFixed(2)}`).join(' · ')}</div>}
+            </div>
+            <div>
+              <div style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute,marginBottom:'6px'}}>Cash hold</div>
+              <div style={{color:C.hi,fontWeight:600,fontSize:'13px'}}>{cfg.cash}</div>
+            </div>
+          </div>
+        </div>
+
+        {(mode==='ROTATE'||mode==='HOARD')&&(
+          <div style={{marginTop:'20px',paddingTop:'16px',borderTop:`1px solid ${C.border}`}}>
+            <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'10px'}}>Break-even rotation calculator</div>
+            <div style={{display:'flex',gap:'8px',marginBottom:'10px',flexWrap:'wrap'}}>
+              <div style={{flex:'1 1 100px',minWidth:'90px'}}>
+                <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:'4px'}}>Shares to sell</div>
+                <input type="number" placeholder={sizingGuardrail?String(sizingGuardrail.maxSellShares):'e.g. 50'} value={beqSellShares} onChange={e=>setBeqSellShares(e.target.value)} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'7px 10px',fontFamily:S,fontSize:'13px'}}/>
+              </div>
+              <div style={{flex:'1 1 100px',minWidth:'90px'}}>
+                <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:'4px'}}>Sell price (USD)</div>
+                <input type="number" placeholder={`${mstrPrice.toFixed(2)}`} value={beqSellPrice} onChange={e=>setBeqSellPrice(e.target.value)} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'7px 10px',fontFamily:S,fontSize:'13px'}}/>
+              </div>
+            </div>
+            {beqCalc?(
+              <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:'3px',padding:'12px 14px'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'10px'}}>
+                  <div>
+                    <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'2px'}}>Breakeven buyback</div>
+                    <div style={{color:C.gold,fontSize:'20px',fontWeight:700}}>${beqCalc.breakeven.toFixed(2)}</div>
+                    <div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>buy back ≤ this price to net ≥1 extra share</div>
+                  </div>
+                  <div style={{textAlign:'right'}}>
+                    <div style={{fontSize:'9px',color:C.mute,marginBottom:'2px'}}>Proceeds</div>
+                    <div style={{color:C.text,fontSize:'13px',fontWeight:600}}>${Math.round(beqCalc.proceeds).toLocaleString()}</div>
+                    <div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>{beqCalc.sh.toFixed(0)} sh @ ${beqCalc.sp.toFixed(2)}</div>
+                  </div>
+                </div>
+                <div style={{borderTop:`1px solid ${C.border}`,paddingTop:'8px'}}>
+                  <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'6px'}}>Shares gained at buyback discount</div>
+                  {beqCalc.steps.map(step=>(
+                    <div key={step.pct} style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:'11px',marginBottom:'3px'}}>
+                      <span style={{color:C.mute}}>−{step.pct.toFixed(0)}% → ${step.buyPrice.toFixed(2)}</span>
+                      <span style={{color:step.netExtra>0?C.green:C.red,fontWeight:600}}>{step.netExtra>0?'+':''}{step.netExtra.toFixed(2)} sh net</span>
+                    </div>
+                  ))}
+                  <div style={{fontSize:'9px',color:C.faint,marginTop:'8px',fontStyle:'italic',lineHeight:1.4}}>Net = shares bought back minus shares sold. Positive = accumulation. Fees not included.</div>
+                </div>
+              </div>
+            ):<div style={{fontSize:'10px',color:C.faint,fontStyle:'italic',padding:'8px 0'}}>Enter shares and sell price above to calculate breakeven buyback level.</div>}
+          </div>
+        )}
+
+        {sizingGuardrail!==null&&(
+          <div style={{marginTop:'16px',paddingTop:'14px',borderTop:`1px solid ${C.border}`}}>
+            <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Sizing guardrail · {profile.rotationSizePctHigh}% {profile.label}{dilutionBrakeActive&&<span style={{color:C.red,marginLeft:'6px'}}>· Brake active</span>}</div>
+            <div className="g-auto-2">
+              <div style={{padding:'8px 10px',background:'rgba(199,62,29,0.06)',border:'1px solid rgba(199,62,29,0.2)',borderRadius:'3px'}}>
+                <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Max sell rotation</div>
+                {sizingGuardrail.sellThrottled?(
+                  <>
+                    <div style={{color:C.green,fontSize:'13px',fontWeight:700,letterSpacing:'0.04em'}}>Sell suspended</div>
+                    <div style={{fontSize:'9px',color:C.green,marginTop:'3px',lineHeight:1.4}}>Cash target met — throttle active</div>
+                  </>
+                ):(
+                  <>
+                    <div style={{color:C.red,fontSize:'14px',fontWeight:600}}>{sizingGuardrail.maxSellShares} sh</div>
+                    <div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>≈ £{Math.round(sizingGuardrail.maxSellGBP).toLocaleString()}</div>
+                  </>
+                )}
+              </div>
+              <div style={{padding:'8px 10px',background:sizingGuardrail.cashGateFailed?'rgba(42,48,64,0.4)':'rgba(45,134,89,0.06)',border:`1px solid ${sizingGuardrail.cashGateFailed?'#2a3040':'rgba(45,134,89,0.2)'}`,borderRadius:'3px'}}>
+                <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Max buy (cash)</div>
+                {sizingGuardrail.cashGateFailed?(
+                  <>
+                    <div style={{color:'#c8b84a',fontSize:'13px',fontWeight:700,letterSpacing:'0.04em'}}>Insufficient Cash Buffer</div>
+                    <div style={{fontSize:'9px',color:'#7a8aaa',marginTop:'3px',lineHeight:1.4}}>{sizingGuardrail.cashGateReason}</div>
+                  </>
+                ):(
+                  <>
+                    <div style={{color:C.green,fontSize:'14px',fontWeight:600}}>{sizingGuardrail.maxBuyShares} sh</div>
+                    <div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>≈ £{Math.round(sizingGuardrail.maxBuyGBP).toLocaleString()}</div>
+                  </>
+                )}
+              </div>
+            </div>
+            <div style={{fontSize:'9px',color:C.faint,marginTop:'6px',fontStyle:'italic',lineHeight:1.4}}>Guideline only. Sell cap = {profile.rotationSizePctHigh}% of position. Buy cap = lesser of position % or available cash.</div>
+            {mode==='HOARD'&&cashBufferStaleDays!==null&&cashBufferStaleDays>7&&<div style={{marginTop:'8px',padding:'6px 10px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px',fontSize:'9px',color:C.red,lineHeight:1.5}}>⚠ Cash buffer last confirmed {cashBufferStaleDays}d ago. Cash gate is making hard decisions on this figure — verify it reflects actual SIPP balance.</div>}
+          </div>
+        )}
+
+        <div style={{marginTop:'16px',paddingTop:'14px',borderTop:`1px solid ${C.border}`}}>
+          <div style={{display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap',marginBottom:'6px'}}>
+            <span style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute}}>Style</span>
+            {['conservative','moderate','aggressive'].map(s=>{const active=aggressionStyle===s;return<button key={s} onClick={()=>setAggressionStyle(s)} style={{background:active?cfg.color:'transparent',color:active?'#000':C.dim,border:`1px solid ${active?cfg.color:C.border}`,padding:'3px 9px',fontFamily:S,fontSize:'10px',letterSpacing:'0.1em',textTransform:'uppercase',cursor:'pointer',fontWeight:active?600:400,borderRadius:'2px'}}>{s==='moderate'?'Mod':s.charAt(0).toUpperCase()+s.slice(1,4)}</button>;})}
+            <span style={{fontSize:'11px',color:C.mute,marginLeft:'4px',fontSize:'10px'}}>{profile.rotationSizePctLow}–{profile.rotationSizePctHigh}% rotation</span>
+            {dilutionBrakeActive&&<span style={{fontSize:'9px',color:C.red,border:`1px solid ${C.red}`,padding:'2px 6px',borderRadius:'2px',letterSpacing:'0.08em',fontWeight:700,background:'#1a0f0d',whiteSpace:'nowrap'}}>Dilution Brake Active</span>}
+          </div>
+          {dilutionBrakeActive&&<div style={{fontSize:'10px',color:C.red,marginBottom:'8px',lineHeight:1.5,padding:'8px 10px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px'}}>Rotation size halved ({baseProfile.rotationSizePctLow}–{baseProfile.rotationSizePctHigh}% → {profile.rotationSizePctLow}–{profile.rotationSizePctHigh}%): ATM programme active while mNAV &lt; 1.2x.</div>}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:'10px',color:C.mute,gap:'8px'}}>
+            <span style={{flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{levelsAuto&&technicals?`ATR(14) $${technicals.atr14.toFixed(1)} · ${technicals.low20.toFixed(0)}–${technicals.high20.toFixed(0)}${!ma200?' · 200MA missing':''}` :'Manual levels'}</span>
+            <span onClick={()=>setLevelsAuto(!levelsAuto)} style={{cursor:'pointer',color:levelsAuto?C.green:C.mute,letterSpacing:'0.05em',flexShrink:0}}>{levelsAuto?'● auto':'○ manual'}</span>
+          </div>
+        </div>
+      </div>);})()}
+
+      {!levelsAuto&&<div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
+        <SH>◆ Manual level overrides</SH>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',fontSize:'11px'}}>
+          <div><div style={{color:C.mute,marginBottom:'4px'}}>Sell zone low</div><input type="number" value={manualSellLow} onChange={e=>setManualSellLow(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'6px 10px',fontFamily:S,fontSize:'12px'}}/></div>
+          <div><div style={{color:C.mute,marginBottom:'4px'}}>Sell zone high</div><input type="number" value={manualSellHigh} onChange={e=>setManualSellHigh(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'6px 10px',fontFamily:S,fontSize:'12px'}}/></div>
+          <div><div style={{color:C.mute,marginBottom:'4px'}}>Buy zone low</div><input type="number" value={manualBuyLow} onChange={e=>setManualBuyLow(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'6px 10px',fontFamily:S,fontSize:'12px'}}/></div>
+          <div><div style={{color:C.mute,marginBottom:'4px'}}>Buy zone high</div><input type="number" value={manualBuyHigh} onChange={e=>setManualBuyHigh(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'6px 10px',fontFamily:S,fontSize:'12px'}}/></div>
+        </div>
+      </div>}
+
+      {levelsAuto&&technicals&&<div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
+        <SH>◆ Technical readout</SH>
+        <div className="g-auto-4" style={{fontSize:'11px'}}>
+          <div><div style={{color:C.mute,fontSize:'9px',letterSpacing:'0.1em',textTransform:'uppercase'}}>20d high</div><div style={{color:C.text,fontSize:'13px',marginTop:'2px'}}>${technicals.high20.toFixed(0)}</div></div>
+          <div><div style={{color:C.mute,fontSize:'9px',letterSpacing:'0.1em',textTransform:'uppercase'}}>20d low</div><div style={{color:C.text,fontSize:'13px',marginTop:'2px'}}>${technicals.low20.toFixed(0)}</div></div>
+          <div><div style={{color:C.mute,fontSize:'9px',letterSpacing:'0.1em',textTransform:'uppercase'}}>50d high</div><div style={{color:C.text,fontSize:'13px',marginTop:'2px'}}>${technicals.high50?technicals.high50.toFixed(0):'—'}</div></div>
+          <div><div style={{color:C.mute,fontSize:'9px',letterSpacing:'0.1em',textTransform:'uppercase'}}>200d low</div><div style={{color:C.text,fontSize:'13px',marginTop:'2px'}}>${technicals.low200?technicals.low200.toFixed(0):'—'}</div></div>
+        </div>
+        <div style={{marginTop:'12px',fontSize:'11px',color:C.dim}}>ATR(14): ${technicals.atr14.toFixed(2)} — typical daily true range. Bands set to ±{(profile.bandWidthMult*100).toFixed(0)}% ATR around target.</div>
+      </div>}
+
+      {(journalStats.tradeCount>0||startingShares>0)&&<div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
+        <SH>◆ Thesis performance</SH>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'12px',marginBottom:'16px'}}>
+          <div><div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Starting</div><div style={{color:C.text,fontSize:'16px',fontWeight:600}}>{startingShares.toFixed(0)} sh</div></div>
+          <div><div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Current</div><div style={{color:C.hi,fontSize:'16px',fontWeight:600}}>{journalStats.currentShares.toFixed(0)} sh</div></div>
+          <div><div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Gain</div><div style={{color:journalStats.sharesDelta>=0?C.green:C.red,fontSize:'16px',fontWeight:600}}>{journalStats.sharesDelta>=0?'+':''}{journalStats.sharesDelta.toFixed(0)}{startingShares>0&&<span style={{fontSize:'11px',color:C.mute,marginLeft:'4px'}}>({journalStats.sharesPct.toFixed(1)}%)</span>}</div></div>
+        </div>
+        <div style={{padding:'10px 0',borderTop:`1px solid ${C.border}`,borderBottom:`1px solid ${C.border}`,marginBottom:'12px'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+            <div>
+              <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Wtd avg cost (trades only)</div>
+              {journalStats.weightedAvgCost!==null?(<>
+                <div style={{color:C.gold,fontSize:'16px',fontWeight:600}}>${journalStats.weightedAvgCost.toFixed(2)}</div>
+                <div style={{fontSize:'9px',color:mstrPrice>=journalStats.weightedAvgCost?C.green:C.red,marginTop:'2px'}}>{mstrPrice>=journalStats.weightedAvgCost?`+${(((mstrPrice-journalStats.weightedAvgCost)/journalStats.weightedAvgCost)*100).toFixed(1)}% above cost`:`${(((mstrPrice-journalStats.weightedAvgCost)/journalStats.weightedAvgCost)*100).toFixed(1)}% below cost`}</div>
+              </>):<div style={{color:C.faint,fontSize:'12px',fontStyle:'italic'}}>No buys logged</div>}
+            </div>
+            <div>
+              <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>BTC exposure</div>
+              <div style={{color:C.gold,fontSize:'16px',fontWeight:600}}>{thesisPerf.btcExposure.toFixed(4)}</div>
+              <div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>BTC equivalent</div>
+            </div>
+          </div>
+        </div>
+        {journalStats.completedRotations>0&&<div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'8px'}}>
+            <div>
+              <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Rotation alpha</div>
+              <div style={{display:'flex',alignItems:'baseline',gap:'6px'}}>
+                <div style={{color:journalStats.rotationShares>=0?C.green:C.red,fontSize:'16px',fontWeight:600}}>{journalStats.rotationShares>=0?'+':''}{journalStats.rotationShares.toFixed(0)} sh</div>
+                {thesisPerf.alphaConfirmed&&<span style={{fontSize:'9px',color:C.green,border:`1px solid ${C.green}`,padding:'1px 5px',borderRadius:'2px',letterSpacing:'0.06em',fontWeight:700}}>ALPHA ✓</span>}
+              </div>
+              <div style={{fontSize:'10px',color:C.green,marginTop:'2px',fontWeight:600}}>≈ £{Math.round(thesisPerf.rotationAlphaGBP).toLocaleString()}</div>
+            </div>
+            <div>
+              <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Cost per extra share</div>
+              {journalStats.costPerExtraShare!==null?(<>
+                <div style={{color:C.hi,fontSize:'16px',fontWeight:600}}>${journalStats.costPerExtraShare.toFixed(0)}</div>
+                {thesisPerf.discountPct!==null&&<div style={{fontSize:'10px',color:thesisPerf.discountPct>10?C.green:thesisPerf.discountPct>0?C.gold:C.red,marginTop:'2px',fontWeight:thesisPerf.discountPct>10?700:400}}>{thesisPerf.discountPct>0?`${thesisPerf.discountPct.toFixed(1)}% below market`:`${Math.abs(thesisPerf.discountPct).toFixed(1)}% above market`}</div>}
+              </>):<div style={{color:C.faint,fontSize:'11px',fontStyle:'italic'}}>Awaiting cycle…</div>}
+            </div>
+          </div>
+          {journalStats.accrualRateAnnual!==null&&<div style={{padding:'8px 10px',background:'#0d0b09',border:`1px dashed ${C.border}`,borderRadius:'3px',fontSize:'10px',color:C.mute,lineHeight:1.5}}>Annualised accrual rate: <span style={{color:C.gold,fontWeight:600}}>{journalStats.accrualRateAnnual.toFixed(1)} sh/yr</span> — {journalStats.completedRotations} rotation{journalStats.completedRotations!==1?'s':''}. Estimate only.</div>}
+        </div>}
+      </div>}
+
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
-        <SH>◆ Portfolio Overview</SH>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',fontSize:'12px',marginBottom:'16px'}}>
-          <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Current Share Count</div><div style={{color:C.hi,fontSize:'24px',fontWeight:600}}>{journalStats.currentShares.toFixed(0)} sh</div></div>
-          <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Total Portfolio Value</div><div style={{color:C.gold,fontSize:'24px',fontWeight:600}}>£{portfolio.totalGBP.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>
+        <SH>◆ On-chain &amp; corporate signals</SH>
+        <div style={{padding:'12px 0',borderBottom:`1px solid ${C.border}`}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'4px'}}>
+            <span style={{color:C.dim,fontSize:'11px',letterSpacing:'0.1em',textTransform:'uppercase'}}>mNAV (EV ÷ BTC NAV)</span>
+            <span style={{color:mnt(mNAV),fontSize:'17px',fontWeight:600}}>{mNAV?`${mNAV.toFixed(2)}x`:'—'}</span>
+          </div>
+          <div style={{fontSize:'11px',color:mnt(mNAV),fontStyle:'italic',marginBottom:'4px'}}>{mnl(mNAV)}</div>
+          <div style={{fontSize:'10px',color:C.mute,lineHeight:1.5}}>Thresholds: <span style={{color:C.green}}>&lt;1.05 sub-NAV</span> · 1.05–1.20 stall · 1.20–1.80 healthy · <span style={{color:C.red}}>1.80–2.50 elevated · &gt;2.50 euphoria</span></div>
+          {parsedMnav!==null&&recomputedMnav!==null&&mNAVdiscrepancy!==null&&mNAVdiscrepancy>MNAV_WARN&&(
+            <div style={{marginTop:'8px',padding:'10px 12px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px'}}>
+              <div style={{fontSize:'11px',color:C.red,fontWeight:600,marginBottom:'4px'}}>⚠ mNAV discrepancy — {mNAVdiscrepancy.toFixed(2)}x gap exceeds ±{MNAV_WARN}x</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'6px'}}>
+                <div style={{fontSize:'10px',color:C.mute}}><div style={{color:C.faint,fontSize:'9px',textTransform:'uppercase',marginBottom:'2px'}}>Pasted (LLM)</div><div style={{color:C.gold}}>{parsedMnav.toFixed(2)}x</div></div>
+                <div style={{fontSize:'10px',color:C.mute}}><div style={{color:C.faint,fontSize:'9px',textTransform:'uppercase',marginBottom:'2px'}}>Recomputed (live)</div><div style={{color:C.red}}>{recomputedMnav.toFixed(2)}x</div></div>
+              </div>
+              <div style={{fontSize:'10px',color:C.mute,lineHeight:1.5}}>Header shows live recomputed value. Refresh before trading.</div>
+            </div>
+          )}
+          {mNAVisLegacy&&<div style={{marginTop:'6px',fontSize:'10px',color:C.mute,fontStyle:'italic'}}>Using legacy market-cap-only mNAV. Paste a prompt response to get the full EV-based figure.</div>}
+          {atmActive&&<div style={{marginTop:'6px',fontSize:'10px',padding:'5px 8px',background:dilutionBrakeActive?'#2a1f1a':'#1a1611',border:`1px dashed ${dilutionBrakeActive?C.red:C.gold}`,color:dilutionBrakeActive?C.red:C.gold}}>ATM programme active{dilutionBrakeActive?' — dilutive at mNAV < 1.2x. Dilution Brake engaged.':' — accretive at current premium (mNAV ≥ 1.2x)'}</div>}
         </div>
-        <div style={{paddingTop:'12px',borderTop:`1px solid ${C.border}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <span style={{color:C.mute,fontSize:'11px'}}>SIPP Cash Buffer</span>
-          <span style={{color:C.hi,fontSize:'14px',fontWeight:600}}>£{cashBuffer.toLocaleString()} ({portfolio.cashPct.toFixed(1)}%)</span>
+        <div style={{padding:'12px 0',borderBottom:`1px solid ${C.border}`}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'4px'}}>
+            <span style={{color:C.dim,fontSize:'11px',letterSpacing:'0.1em',textTransform:'uppercase'}}>BTC vs STH cost</span>
+            <span style={{color:btcBelowSthCost?C.red:C.green,fontSize:'17px',fontWeight:600}}>{sthRealizedPrice?`${(((btcPrice/sthRealizedPrice)-1)*100).toFixed(1)}%`:'—'}</span>
+          </div>
+          <div style={{fontSize:'11px',color:btcBelowSthCost?C.red:C.dim,marginBottom:'4px'}}>{sthRealizedPrice?(btcBelowSthCost?`STHs underwater — cost $${sthRealizedPrice.toLocaleString()}`:`STHs profitable — cost $${sthRealizedPrice.toLocaleString()}`):'Awaiting data'}</div>
+          {sthMstrFloor!==null&&<div style={{fontSize:'10px',color:C.green,marginTop:'4px',fontWeight:600}}>STH MSTR floor: ${sthMstrFloor.toFixed(2)} — DEPLOY ladder anchor {mode==='DEPLOY'&&levelsAuto?'active ✓':'(activates in DEPLOY mode)'}</div>}
+        </div>
+        <div style={{padding:'12px 0',borderBottom:`1px solid ${C.border}`}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'4px'}}>
+            <span style={{color:C.dim,fontSize:'11px',letterSpacing:'0.1em',textTransform:'uppercase'}}>Spot ETF 5-day flows</span>
+            <span style={{color:etfOutflowsPersistent?C.red:(etfFlows5d!==null&&etfFlows5d>100)?C.green:C.gold,fontSize:'17px',fontWeight:600}}>{etfFlows5d!==null?`${etfFlows5d>=0?'+':''}$${etfFlows5d.toLocaleString()}M`:'—'}</span>
+          </div>
+          <div style={{fontSize:'11px',color:etfOutflowsPersistent?C.red:C.dim,marginBottom:'4px'}}>{etfFlows5d===null?'Awaiting data':etfOutflowsPersistent?'Persistent outflows — institutional risk-off':etfFlows5d>500?'Strong inflows — institutional accumulation':'Mixed / neutral flows'}</div>
+        </div>
+        <div style={{padding:'12px 0',borderBottom:`1px solid ${C.border}`}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'4px'}}>
+            <span style={{color:C.dim,fontSize:'11px',letterSpacing:'0.1em',textTransform:'uppercase'}}>BTC dominance</span>
+            <span style={{color:btcDominance===null?C.faint:btcDominance<50?C.red:btcDominance>60?C.green:C.gold,fontSize:'17px',fontWeight:600}}>{btcDominance!==null?`${btcDominance.toFixed(1)}%`:'—'}</span>
+          </div>
+          <div style={{fontSize:'11px',color:btcDominance!==null&&btcDominance<50?C.red:C.dim,marginBottom:'4px'}}>{btcDominance===null?'Awaiting data':btcDominance<50?'Alt-season — capital rotating away from BTC/MSTR':btcDominance>60?'BTC-dominant market — MSTR benefits':'Neutral dominance range'}</div>
+        </div>
+        <div style={{padding:'12px 0',borderBottom:`1px solid ${C.border}`}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'4px'}}>
+            <span style={{color:C.dim,fontSize:'11px',letterSpacing:'0.1em',textTransform:'uppercase'}}>MSTR IV Rank (30-day)</span>
+            <span style={{color:ivRank===null?C.faint:ivRank>75?C.red:ivRank>50?C.gold:C.green,fontSize:'17px',fontWeight:600}}>{ivRank!==null?`${ivRank}`:'—'}</span>
+          </div>
+          <div style={{fontSize:'11px',color:ivRank!==null&&ivRank>75?C.red:C.dim,marginBottom:'4px'}}>{ivRank===null?'Awaiting data':ivRank>75?'Peak speculation — gamma overextension, vol crush risk. Bear signal +1.':ivRank>50?'Elevated options activity':'Normal options pricing'}</div>
+        </div>
+        <div style={{padding:'12px 0'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'4px'}}>
+            <span style={{color:C.dim,fontSize:'11px',letterSpacing:'0.1em',textTransform:'uppercase'}}>MSTR short interest</span>
+            <span style={{color:mstrShortInt===null?C.faint:mstrShortInt>20?C.green:C.dim,fontSize:'17px',fontWeight:600}}>{mstrShortInt!==null?`${mstrShortInt.toFixed(1)}% float`:'—'}</span>
+          </div>
+          <div style={{fontSize:'11px',color:mstrShortInt!==null&&mstrShortInt>20?C.green:C.dim,marginBottom:'4px'}}>{mstrShortInt===null?'Awaiting data':mstrShortInt>20?'High short interest — squeeze fuel present (+1 bottom)':mstrShortInt>12?'Elevated shorts — watch for covering rallies':'Low short interest'}</div>
+        </div>
+        {(totalDebt!==null||preferredNotional!==null||cashPosition!==null)&&<div style={{marginTop:'14px',paddingTop:'14px',borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'8px'}}>EV inputs (most recent 10-Q)</div>
+          <div className="g-auto-3" style={{fontSize:'11px'}}>
+            <div><div style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>Debt</div><div style={{color:C.text,fontSize:'13px',marginTop:'2px'}}>{totalDebt!==null?`$${(totalDebt/1000).toFixed(1)}B`:'—'}</div></div>
+            <div><div style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>Preferred</div><div style={{color:C.text,fontSize:'13px',marginTop:'2px'}}>{preferredNotional!==null?`$${(preferredNotional/1000).toFixed(1)}B`:'—'}</div></div>
+            <div><div style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>Cash</div><div style={{color:C.text,fontSize:'13px',marginTop:'2px'}}>{cashPosition!==null?`$${(cashPosition/1000).toFixed(1)}B`:'—'}</div></div>
+          </div>
+        </div>}
+      </div>
+
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
+        <SH>◆ Portfolio</SH>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',fontSize:'12px',marginBottom:'16px'}}>
+          <div><div style={{color:C.mute,fontSize:'10px',letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'4px'}}>Position</div><div style={{color:C.hi,fontSize:'20px',fontWeight:600}}>{journalStats.currentShares.toFixed(0)} sh</div><div style={{color:C.gold,fontSize:'13px',marginTop:'2px'}}>£{portfolio.positionGBP.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div style={{color:C.mute,fontSize:'10px',marginTop:'2px'}}>${portfolio.positionUSD.toLocaleString(undefined,{maximumFractionDigits:0})} · {portfolio.positionPct.toFixed(0)}%</div></div>
+          <div><div style={{color:C.mute,fontSize:'10px',letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'4px'}}>Cash buffer</div><div style={{color:C.hi,fontSize:'20px',fontWeight:600}}>£{cashBuffer.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div style={{color:portfolio.cashPct>50?C.gold:C.mute,fontSize:'10px',marginTop:'6px'}}>{portfolio.cashPct.toFixed(0)}% of total</div></div>
+        </div>
+        <div style={{paddingTop:'12px',borderTop:`1px solid ${C.border}`,display:'flex',justifyContent:'space-between',alignItems:'baseline'}}><span style={{color:C.mute,fontSize:'10px',letterSpacing:'0.1em',textTransform:'uppercase'}}>Total portfolio</span><span style={{color:C.hi,fontSize:'18px',fontWeight:600}}>£{portfolio.totalGBP.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+        <div style={{paddingTop:'8px',display:'flex',justifyContent:'space-between',alignItems:'baseline'}}><span style={{color:C.mute,fontSize:'10px',letterSpacing:'0.1em',textTransform:'uppercase'}}>USD buying power</span><span style={{color:C.gold,fontSize:'14px',fontWeight:600}}>${(cashBuffer*gbpUsd).toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+        <div style={{marginTop:'14px'}}>
+          <NI value={cashBuffer} onChange={handleCashBufferChange} step={500} label="Cash buffer (GBP)" min={0} max={500000}/>
+          <NI value={gbpUsd} onChange={setGbpUsd} step={0.01} label="GBP/USD rate" precision={2} min={0.5} max={3.0}/>
         </div>
       </div>
 
-      {/* REGIME SIGNALS SCORES */}
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
+        <SH>◆ BTC cycle structure</SH>
+        <div style={{marginBottom:'16px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'10px',gap:'8px'}}>
+            <div><div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase'}}>Current MVRV</div><div style={{fontSize:'20px',color:C.gold,fontWeight:600,marginTop:'2px'}}>{mvrv.toFixed(2)}</div></div>
+            <div style={{textAlign:'center'}}><div style={{fontSize:'28px',color:C.gold,fontWeight:600}}>{mvrvClock.progress.toFixed(0)}%</div><div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase'}}>correction progress</div></div>
+            <div style={{textAlign:'right'}}><div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase'}}>Floor target</div><div style={{fontSize:'14px',color:C.dim,marginTop:'2px'}}>MVRV ≤ 0.8</div><div style={{fontSize:'11px',color:C.gold,marginTop:'1px'}}>capitulation zone</div></div>
+          </div>
+          <div style={{position:'relative',height:'8px',background:C.bg,border:`1px solid ${C.border}`,borderRadius:'4px',overflow:'hidden',marginBottom:'6px'}}>
+            <div style={{width:`${mvrvClock.progress}%`,height:'100%',background:`linear-gradient(90deg,${C.gold} 0%,${mvrvClock.progress>70?C.green:mvrvClock.progress>40?C.gold:C.red} 100%)`,transition:'width 0.3s ease'}}/>
+          </div>
+        </div>
+      </div>
+
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'24px'}}>
         <div style={{background:C.panel,padding:'16px',border:`1px solid ${C.border}`}}>
           <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Bear signals</div>
           <div style={{fontSize:'28px',color:bearScore>=6?C.red:C.gold,fontWeight:600}}>{bearScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
-          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥6 → HOARD REGIME</div>
+          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥6 → HOARD</div>
+          {bearItems.length>0&&<button onClick={()=>setBearBreakdownOpen(o=>!o)} style={{marginTop:'8px',background:'transparent',border:`1px solid ${C.border}`,color:C.mute,padding:'3px 8px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',textTransform:'uppercase',cursor:'pointer',borderRadius:'2px',width:'100%'}}>{bearBreakdownOpen?'▲ hide':'▼ breakdown'}</button>}
+          {bearBreakdownOpen&&<div style={{marginTop:'8px',borderTop:`1px solid ${C.border}`,paddingTop:'8px'}}>
+            {bearItems.map((item,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'9px',color:C.dim,marginBottom:'3px',lineHeight:1.4}}>
+              <span style={{flex:1,marginRight:'6px'}}>{item.label}</span>
+              <span style={{color:C.red,fontWeight:600,flexShrink:0}}>+{item.pts}</span>
+            </div>)}
+          </div>}
         </div>
         <div style={{background:C.panel,padding:'16px',border:`1px solid ${C.border}`}}>
           <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Bottom signals</div>
           <div style={{fontSize:'28px',color:bottomScore>=7?C.green:C.gold,fontWeight:600}}>{bottomScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
-          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥7 → DEPLOY REGIME</div>
+          <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥{DEPLOY_SCORE_MIN} + MSTR&lt;${dynamicCeiling} → DEPLOY</div>
+          {bottomItems.length>0&&<button onClick={()=>setBottomBreakdownOpen(o=>!o)} style={{marginTop:'8px',background:'transparent',border:`1px solid ${C.border}`,color:C.mute,padding:'3px 8px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',textTransform:'uppercase',cursor:'pointer',borderRadius:'2px',width:'100%'}}>{bottomBreakdownOpen?'▲ hide':'▼ breakdown'}</button>}
+          {bottomBreakdownOpen&&<div style={{marginTop:'8px',borderTop:`1px solid ${C.border}`,paddingTop:'8px'}}>
+            {bottomItems.map((item,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'9px',color:C.dim,marginBottom:'3px',lineHeight:1.4}}>
+              <span style={{flex:1,marginRight:'6px'}}>{item.label}</span>
+              <span style={{color:C.green,fontWeight:600,flexShrink:0}}>+{item.pts}</span>
+            </div>)}
+          </div>}
         </div>
       </div>
 
-      {/* ACTIVE SIGNALS LIST */}
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
-        <SH>◆ Active On-Chain & Technical Indicators</SH>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',fontSize:'11px'}}>
-          <div style={{color:below200ma?C.red:C.dim}}>• MSTR Below 200MA: <strong>{below200ma?'ON':'OFF'}</strong></div>
-          <div style={{color:derivativesExhaustion?C.green:C.dim}}>• Derivatives Exhaustion: <strong>{derivativesExhaustion?'ON':'OFF'}</strong></div>
-          <div style={{color:mnavCompressed?C.green:C.dim}}>• mNAV Compressed (&lt;1.05x): <strong>{mnavCompressed?'ON':'OFF'}</strong></div>
-          <div style={{color:btcBelowSthCost?C.green:C.dim}}>• BTC Below STH Cost: <strong>{btcBelowSthCost?'ON':'OFF'}</strong></div>
-          <div style={{color:C.gold}}>• NUPL: <strong>{nupl}%</strong></div>
-          <div style={{color:C.gold}}>• MVRV: <strong>{mvrv}</strong></div>
-          <div style={{color:C.gold}}>• STH Realized: <strong>${sthRealizedPrice.toLocaleString()}</strong></div>
-          <div style={{color:C.gold}}>• ETF 5D Flow: <strong>${etfFlows5d}M</strong></div>
+        <SH>◆ Legacy NAV view (per-share)</SH>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',fontSize:'12px',marginBottom:'14px'}}>
+          <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>BTC per share</div><div style={{color:C.hi,fontSize:'15px',marginTop:'2px'}}>{btcPerShare.toFixed(5)} BTC</div></div>
+          <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Fair value</div><div style={{color:C.hi,fontSize:'15px',marginTop:'2px'}}>${fairValue.toFixed(2)}</div></div>
+          <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Current price</div><div style={{color:C.hi,fontSize:'15px',marginTop:'2px'}}>${mstrPrice.toFixed(2)}</div></div>
+          <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Legacy mNAV</div><div style={{color:mnt(legacyMnav),fontSize:'15px',marginTop:'2px',fontWeight:600}}>{legacyMnav.toFixed(2)}x</div></div>
+        </div>
+        <div style={{marginTop:'14px'}}>
+          <NI value={btcHoldings} onChange={handleHoldingsChange} step={100} label="BTC holdings" min={0} max={5000000}/>
+          <NI value={dilutedShares} onChange={handleSharesChange} step={1} label="Diluted shares (M)" precision={1} min={1} max={2000}/>
         </div>
       </div>
 
-      {/* PROMPT UPDATER */}
+      <button onClick={saveSnapshot} style={{width:'100%',background:C.panel,border:`1px solid ${C.gold}`,color:C.gold,padding:'12px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',marginBottom:'24px'}}>◆ Save snapshot to log</button>
+
+      <div style={{marginBottom:'24px'}}>
+        <SH>◆ Manual price override</SH>
+        <NI value={mstrPrice} onChange={setMstrPrice} step={1} label="MSTR price" suffix="USD" min={1} max={1000}/>
+        <NI value={btcPrice} onChange={setBtcPrice} step={500} label="BTC price" suffix="USD" min={1000} max={500000}/>
+      </div>
+
+      {/* PROMPT */}
       <div style={{background:C.panel,border:`1px solid ${C.gold}`,padding:'20px',marginBottom:'24px'}}>
-        <SH>◆ Refresh Indicators via LLM</SH>
-        <div style={{fontSize:'11px',color:C.dim,marginBottom:'12px'}}>Copy the prompt below into Claude/Gemini with web search enabled to obtain real-time metrics.</div>
-        <textarea ref={promptTextareaRef} readOnly value={fullClaudePrompt} style={{width:'100%',height:'120px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'10px',fontFamily:'Menlo,monospace',fontSize:'10px',resize:'vertical',lineHeight:1.4}}/>
-        <button onClick={copyPrompt} style={{width:'100%',marginTop:'8px',background:promptCopied?C.green:C.gold,color:C.bg,border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>{promptCopied?'✓ Prompt Copied':'◆ Copy Prompt'}</button>
-        
-        <div style={{marginTop:'16px',paddingTop:'16px',borderTop:`1px solid ${C.border}`}}>
-          <div style={{fontSize:'10px',color:C.mute,textTransform:'uppercase',marginBottom:'6px'}}>Paste LLM Response Block</div>
-          <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} placeholder={'---BEGIN DATA---\nMSTR_PRICE: 134.73\nBTC_PRICE: 80866\n...\n---END DATA---'} style={{width:'100%',height:'100px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'10px',fontFamily:'Menlo,monospace',fontSize:'10px'}}/>
-          <button onClick={applyPaste} style={{width:'100%',marginTop:'8px',background:C.green,color:'#fff',border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>◆ Apply Live Data</button>
+        <SH>◆ Prompt-driven update (3 steps)</SH>
+        <div style={{fontSize:'11px',color:C.dim,marginBottom:'12px',lineHeight:1.6}}><strong style={{color:C.gold}}>Step 1:</strong> copy prompt below. <strong style={{color:C.gold}}>Step 2:</strong> paste into Claude/Gemini with web search. <strong style={{color:C.gold}}>Step 3:</strong> paste response below.</div>
+        <textarea ref={promptTextareaRef} readOnly value={claudePrompt} onClick={handlePromptTextareaClick} style={{width:'100%',height:'220px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'12px',fontFamily:'Menlo,monospace',fontSize:'11px',resize:'vertical',lineHeight:1.5,boxSizing:'border-box'}}/>
+        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:'8px',marginTop:'10px'}}>
+          <button onClick={copyPrompt} style={{background:promptCopied?C.green:C.gold,color:C.bg,border:'none',padding:'10px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>{promptCopied?'✓ copied':'◆ copy prompt'}</button>
+          <button onClick={handlePromptTextareaClick} style={{background:'transparent',color:C.gold,border:`1px solid ${C.gold}`,padding:'10px',fontFamily:S,fontSize:'10px',letterSpacing:'0.1em',textTransform:'uppercase',cursor:'pointer'}}>select all</button>
+        </div>
+        {promptSelectMsg&&<div style={{marginTop:'8px',fontSize:'11px',color:C.gold,padding:'8px 10px',background:'#1a1611',border:`1px dashed ${C.gold}`}}>{promptSelectMsg}</div>}
+        <div style={{marginTop:'20px',paddingTop:'20px',borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:'11px',letterSpacing:'0.15em',color:C.dim,textTransform:'uppercase',marginBottom:'10px',fontFamily:S}}>◆ Paste response here</div>
+          <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} placeholder={'Paste the data block here.\n\n---BEGIN DATA---\nMSTR_PRICE: 134.73\nBTC_PRICE: 80866\nMNAV: 1.02\n...\n---END DATA---'} style={{width:'100%',height:'160px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'12px',fontFamily:'Menlo,monospace',fontSize:'11px',resize:'vertical',lineHeight:1.5,boxSizing:'border-box'}}/>
+          <button onClick={applyPaste} style={{width:'100%',marginTop:'10px',background:C.green,color:'#fff',border:'none',padding:'10px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>◆ apply readings</button>
+          {pasteResult&&<div style={{marginTop:'10px',fontSize:'11px',padding:'10px 12px',background:pasteResult.ok?'#0f1a13':'#1a0f0d',border:`1px dashed ${pasteResult.ok?C.green:C.red}`,color:pasteResult.ok?C.green:C.red,lineHeight:1.5}}>{pasteResult.ok?'✓ ':'⚠ '}{pasteResult.msg}</div>}
         </div>
       </div>
     </>)}
 
-    {/* TRADE TRACKER TAB */}
+    {/* POSITIONS TAB */}
+    {view==='positions'&&(<>
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'20px'}}>
+        <SH>◆ Open new position</SH>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',fontSize:'11px',marginBottom:'12px'}}>
+          <div><div style={{color:C.mute,marginBottom:'4px'}}>Shares</div><input type="number" placeholder="Shares" value={positionForm.shares} onChange={e=>setPositionForm({...positionForm,shares:e.target.value})} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/></div>
+          <div><div style={{color:C.mute,marginBottom:'4px'}}>Entry price (USD)</div><input type="number" placeholder="Entry" value={positionForm.entryPrice} onChange={e=>setPositionForm({...positionForm,entryPrice:e.target.value})} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/></div>
+        </div>
+        <button onClick={()=>openPosition()} disabled={!positionForm.shares||!positionForm.entryPrice} style={{width:'100%',background:positionForm.shares&&positionForm.entryPrice?C.green:C.border,color:'#fff',border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',cursor:'pointer'}}>OPEN POSITION</button>
+      </div>
+    </>)}
+
+    {/* PROJECT TAB */}
+    {view==='project'&&(
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'20px'}}>
+        <SH>◆ What-if projection</SH>
+        <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+          {projectionScenarios.map(sc=>(
+            <div key={sc.label} style={{padding:'14px 16px',background:C.bg,border:`1px solid ${sc.color}`,borderRadius:'3px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px'}}>
+                <div style={{fontSize:'11px',color:sc.color,fontWeight:700,letterSpacing:'0.2em',textTransform:'uppercase'}}>{sc.label}</div>
+                <div style={{fontSize:'10px',color:sc.vsCurrentPct>=0?C.green:C.red,fontWeight:600}}>{sc.vsCurrentPct>=0?'+':''}{sc.vsCurrentPct.toFixed(0)}% vs today</div>
+              </div>
+              <div className="g-auto-4">
+                <div><div style={{fontSize:'9px',color:C.faint,textTransform:'uppercase',marginBottom:'2px'}}>MSTR</div><div style={{color:sc.color,fontSize:'12px',fontWeight:600}}>${sc.impliedPrice.toFixed(0)}</div></div>
+                <div><div style={{fontSize:'9px',color:C.faint,textTransform:'uppercase',marginBottom:'2px'}}>Portfolio</div><div style={{color:sc.color,fontSize:'12px',fontWeight:600}}>£{Math.round(sc.totalGBP).toLocaleString()}</div></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
+
+    {/* BACKUP TAB */}
+    {view==='backup'&&(<>
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'20px'}}>
+        <SH>◆ Export state</SH>
+        <button onClick={exportJSONFile} style={{width:'100%',background:C.gold,color:'#000',border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',cursor:'pointer',borderRadius:'2px',fontWeight:600}}>DOWNLOAD .JSON</button>
+      </div>
+    </>)}
+
+    {/* JOURNAL TAB */}
     {view==='journal'&&(<>
-      <div style={{background:C.panel,border:`1px solid ${C.gold}`,padding:'20px',marginBottom:'20px'}}>
-        <SH>◆ Log Trade Execution</SH>
-        <div style={{fontSize:'11px',color:C.dim,marginBottom:'14px'}}>Log executions directly to adjust share counts and update cash buffers.</div>
-        
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'20px'}}>
+        <SH>◆ Campaign progress</SH>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',fontSize:'12px',marginBottom:'16px'}}>
+          <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Starting shares</div><input type="number" value={startingShares} onChange={e=>setStartingShares(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.hi,padding:'6px 10px',fontFamily:S,fontSize:'15px',marginTop:'4px'}}/></div>
+          <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Current shares</div><div style={{color:C.hi,fontSize:'20px',marginTop:'4px',fontWeight:600}}>{journalStats.currentShares.toFixed(0)}</div></div>
+        </div>
+      </div>
+
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'20px'}}>
+        <SH>◆ Add Trade / DCA Log</SH>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'12px'}}>
           <div style={{display:'flex',gap:'8px',gridColumn:'span 2'}}>
-            <button onClick={()=>setTradeType('SELL')} style={{flex:1,background:tradeType==='SELL'?C.red:'transparent',color:tradeType==='SELL'?'#fff':C.dim,border:`1px solid ${tradeType==='SELL'?C.red:C.border}`,padding:'10px',fontFamily:S,fontSize:'12px',cursor:'pointer',fontWeight:700}}>SELL</button>
-            <button onClick={()=>setTradeType('BUY')} style={{flex:1,background:tradeType==='BUY'?C.green:'transparent',color:tradeType==='BUY'?'#fff':C.dim,border:`1px solid ${tradeType==='BUY'?C.green:C.border}`,padding:'10px',fontFamily:S,fontSize:'12px',cursor:'pointer',fontWeight:700}}>BUY</button>
+            <button onClick={()=>setTradeType('SELL')} style={{flex:1,background:tradeType==='SELL'?C.red:'transparent',color:tradeType==='SELL'?'#fff':C.dim,border:`1px solid ${tradeType==='SELL'?C.red:C.border}`,padding:'8px',fontFamily:S,fontSize:'11px',letterSpacing:'0.1em',cursor:'pointer',fontWeight:700}}>SELL</button>
+            <button onClick={()=>setTradeType('BUY')} style={{flex:1,background:tradeType==='BUY'?C.green:'transparent',color:tradeType==='BUY'?'#fff':C.dim,border:`1px solid ${tradeType==='BUY'?C.green:C.border}`,padding:'8px',fontFamily:S,fontSize:'11px',letterSpacing:'0.1em',cursor:'pointer',fontWeight:700}}>BUY</button>
           </div>
-
-          <div>
-            <div style={{color:C.mute,fontSize:'10px',marginBottom:'4px'}}>Date</div>
-            <input type="date" value={tradeDate} onChange={e=>setTradeDate(e.target.value)} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/>
-          </div>
-
-          <div>
-            <div style={{color:C.mute,fontSize:'10px',marginBottom:'4px'}}>Shares Count</div>
-            <input type="number" placeholder="e.g. 79" value={tradeShares} onChange={e=>setTradeShares(e.target.value)} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/>
-          </div>
-
+          <input type="date" value={tradeDate} onChange={e=>setTradeDate(e.target.value)} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/>
+          <input type="number" placeholder="Shares Count" value={tradeShares} onChange={e=>setTradeShares(e.target.value)} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/>
+          
           <div style={{gridColumn:'span 2'}}>
             <div style={{color:C.mute,fontSize:'10px',marginBottom:'4px'}}>Format</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'6px'}}>
@@ -592,52 +1816,46 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
           </div>
 
           <div style={{gridColumn:'span 2'}}>
-            <div style={{color:C.mute,fontSize:'10px',marginBottom:'4px'}}>
-              {tradePriceMode==='GBP_TOTAL' && 'Total Proceeds / Cost (£ GBP)'}
-              {tradePriceMode==='GBX' && 'Price Per Share in Pence (e.g. 10190.95)'}
-              {tradePriceMode==='GBP_PRICE' && 'Price Per Share in Pounds (£ GBP)'}
-              {tradePriceMode==='USD' && 'Price Per Share in USD ($)'}
-            </div>
-            <input type="number" step="any" placeholder="Enter value..." value={tradePriceInput} onChange={e=>setTradePriceInput(e.target.value)} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.gold,padding:'10px',fontFamily:S,fontSize:'14px',fontWeight:600}}/>
+            <input type="number" step="any" placeholder="Enter Amount / Proceeds" value={tradePriceInput} onChange={e=>setTradePriceInput(e.target.value)} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.gold,padding:'10px',fontFamily:S,fontSize:'14px',fontWeight:600}}/>
           </div>
 
-          <div style={{gridColumn:'span 2',display:'flex',alignItems:'center',gap:'8px',marginTop:'4px'}}>
+          <div style={{gridColumn:'span 2',display:'flex',alignItems:'center',gap:'8px'}}>
             <input type="checkbox" id="syncCash" checked={autoSyncCash} onChange={e=>setAutoSyncCash(e.target.checked)}/>
-            <label htmlFor="syncCash" style={{fontSize:'11px',color:C.dim,cursor:'pointer'}}>Auto-update Cash Buffer with trade proceeds/cost</label>
+            <label htmlFor="syncCash" style={{fontSize:'11px',color:C.dim,cursor:'pointer'}}>Auto-sync proceeds to SIPP Cash Buffer</label>
           </div>
         </div>
-
-        <button onClick={addTrade} style={{width:'100%',background:C.gold,color:C.bg,border:'none',padding:'12px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:700}}>+ Log {tradeType} Execution</button>
+        <button onClick={addTrade} style={{width:'100%',background:C.gold,color:C.bg,border:'none',padding:'10px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>+ Log Trade</button>
       </div>
 
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px'}}>
-        <SH>◆ Execution History ({trades.length})</SH>
+        <SH>◆ Trade history</SH>
         {trades.length===0?<div style={{color:C.faint,fontSize:'12px',textAlign:'center',padding:'20px 0'}}>No trades logged yet.</div>
           :[...trades].sort((a,b)=>b.date.localeCompare(a.date)).map(t=>(
             <div key={t.id} style={{display:'grid',gridTemplateColumns:'60px 1fr 1fr 1fr 30px',gap:'10px',padding:'10px 0',borderBottom:`1px solid ${C.border}`,fontSize:'12px',alignItems:'center'}}>
               <span style={{color:t.type==='SELL'?C.red:C.green,fontWeight:600,letterSpacing:'0.1em',fontSize:'10px'}}>{t.type}</span>
               <span style={{color:C.dim}}>{t.date}</span>
               <span style={{color:C.text}}>{t.shares} sh</span>
-              <span style={{color:C.gold}}>${t.price} {t.totalGbp && `(£${t.totalGbp.toLocaleString()})`}</span>
+              <span style={{color:C.gold}}>${t.price} {t.totalGbp&&`(£${t.totalGbp.toLocaleString()})`}</span>
               <button onClick={()=>deleteTrade(t.id)} style={{background:'transparent',border:'none',color:C.faint,cursor:'pointer',fontSize:'14px'}}>×</button>
             </div>
           ))}
       </div>
     </>)}
 
-    {/* BACKUP TAB */}
-    {view==='backup'&&(
+    {/* SNAPSHOTS TAB */}
+    {view==='snapshots'&&(
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px'}}>
-        <SH>◆ Backup Framework State</SH>
-        <button onClick={()=>{
-          const blob=new Blob([JSON.stringify({trades,startingShares,cashBuffer,gbpUsd},null,2)],{type:'application/json'});
-          const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mstr-cycle-backup.json'; a.click();
-        }} style={{width:'100%',background:C.gold,color:'#000',border:'none',padding:'12px',fontFamily:S,fontSize:'11px',fontWeight:700,cursor:'pointer'}}>EXPORT JSON BACKUP</button>
+        <SH>◆ Signal evolution log</SH>
+        <EquityCurve snapshots={snapshots} startingShares={startingShares} mstrPrice={mstrPrice} gbpUsd={gbpUsd}/>
       </div>
     )}
 
+    <div style={{textAlign:'center',marginTop:'32px',fontSize:'10px',color:C.faint,letterSpacing:'0.15em'}}>
+      NOT FINANCIAL ADVICE · YOUR THESIS · YOUR CONVICTION · YOUR DECISION
     </div>
     </div>
+    </div>
+    </>
   );
 }
 
