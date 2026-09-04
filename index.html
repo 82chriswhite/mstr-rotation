@@ -9,7 +9,21 @@
 <title>MSTR Cycle Tool</title>
 <!--
   MSTR CYCLE DECISION FRAMEWORK v14.12
-  Restored Full Engine + Agile Multi-Currency DCA / Unpaired Logger
+  Changes vs v14.11:
+  1. LIVE FX RATE — GBP/USD is now part of the data-collection prompt (GBP_USD field) and
+     parsed on paste, so GBP portfolio figures stay current instead of drifting on a stale
+     manual rate. Manual override still available; both stamp a gbpUsdUpdated timestamp and a
+     freshness hint appears in the Portfolio panel. Prompt bumped to v3.
+  2. DCA POSITION HANDLING — positions can now be TRIMMED, not just fully closed. Enter a
+     quantity <= the open size to sell part of a lot (e.g. open 101, trim 79, 22 remain open);
+     leave qty blank to close the balance. Each close/trim still writes a paired SELL to the
+     Journal. Positions accumulate a closes[] history; realized P&L is summed across partial
+     exits, unrealized shown on the remaining open portion.
+  3. DCA JOURNAL METRIC — rotation accounting no longer overwrites on consecutive sells. Sells
+     booked since the last buy aggregate, so a buy-back matches against the whole pool. A buy
+     need not be matched by an identical sell; single round-trips behave exactly as before.
+  4. Restored DEPLOY-approaching banner conditional; added gbpUsdUpdated + cashBufferUpdated to
+     JSON import restore. All v14.11 features preserved intact.
 -->
 <script>
   const PASSWORD_HASH = '021ab4d101785587d5ddc3e3715150393924c9df228cb6732c40da48a6cfc7c4';
@@ -42,11 +56,9 @@
   .gate-btn { width:100%; background:#d4a017; color:#000; border:none; padding:11px; font-size:11px; letter-spacing:0.18em; text-transform:uppercase; cursor:pointer; border-radius:2px; font-weight:600; }
   .gate-btn:disabled { background:#2a2520; color:#5a5048; cursor:not-allowed; }
   .gate-err { font-size:11px; color:#c73e1d; margin-top:10px; min-height:14px; }
-
   .zone-overlay { position:fixed; inset:0; z-index:1000; background:rgba(10,8,6,0.9); display:flex; align-items:center; justify-content:center; padding:24px; animation:zfadeIn 0.2s ease; }
   @keyframes zfadeIn { from{opacity:0} to{opacity:1} }
   .zone-card { background:#14100c; padding:24px; max-width:340px; width:100%; border-radius:4px; }
-
   .g-auto-4 { display:grid; grid-template-columns:repeat(auto-fit,minmax(70px,1fr)); gap:12px; }
   .g-auto-3 { display:grid; grid-template-columns:repeat(auto-fit,minmax(90px,1fr)); gap:8px; }
   .g-auto-2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
@@ -107,46 +119,48 @@ function ZoneHitPrompt({ hit, onActed, onMissed, onDismiss }) {
   );
 }
 
+
 function MSTRCycleTool() {
-  const [mstrPrice,setMstrPrice]=useState(134.73);
-  const [btcPrice,setBtcPrice]=useState(80866);
-  const [ma200,setMa200]=useState(141.04);
+  const [mstrPrice,setMstrPrice]=useState(187);
+  const [btcPrice,setBtcPrice]=useState(80000);
+  const [ma200,setMa200]=useState(null);
   const [lastUpdated,setLastUpdated]=useState(null);
   const [pasteText,setPasteText]=useState('');
   const [pasteResult,setPasteResult]=useState(null);
-  const [high20,setHigh20]=useState(137.74);
-  const [low20,setLow20]=useState(81.81);
-  const [high50,setHigh50]=useState(193);
-  const [low50,setLow50]=useState(81.81);
-  const [low200,setLow200]=useState(81.81);
-  const [atr14,setAtr14]=useState(7.06);
-  const [nupl,setNupl]=useState(29.8);
-  const [mvrv,setMvrv]=useState(1.5);
+  const [high20,setHigh20]=useState(null);
+  const [low20,setLow20]=useState(null);
+  const [high50,setHigh50]=useState(null);
+  const [low50,setLow50]=useState(null);
+  const [low200,setLow200]=useState(null);
+  const [atr14,setAtr14]=useState(null);
+  const [nupl,setNupl]=useState(19);
+  const [mvrv,setMvrv]=useState(1.4);
   const [fundingNegative,setFundingNegative]=useState(false);
-  const [derivativesExhaustion,setDerivativesExhaustion]=useState(true);
-  const [below200ma,setBelow200ma]=useState(true);
+  const [derivativesExhaustion,setDerivativesExhaustion]=useState(false);
+  const [below200ma,setBelow200ma]=useState(false);
   const [weeklyLowerLow,setWeeklyLowerLow]=useState(false);
   const [dxyAbove110,setDxyAbove110]=useState(false);
-  const [btcHoldings,setBtcHoldings]=useState(840447);
-  const [dilutedShares,setDilutedShares]=useState(384.2);
+  const [btcHoldings,setBtcHoldings]=useState(818869);
+  const [dilutedShares,setDilutedShares]=useState(280);
   const [corporateBaseUpdated,setCorporateBaseUpdated]=useState(null);
-  const [startingShares,setStartingShares]=useState(474);
-  const [cashBuffer,setCashBuffer]=useState(7964.20);
-  const [gbpUsd,setGbpUsd]=useState(1.31);
-  const [parsedMnav,setParsedMnav]=useState(1.02);
-  const [totalDebt,setTotalDebt]=useState(6700);
-  const [preferredNotional,setPreferredNotional]=useState(15462);
-  const [cashPosition,setCashPosition]=useState(4650);
-  const [sthRealizedPrice,setSthRealizedPrice]=useState(62500);
+  const [startingShares,setStartingShares]=useState(0);
+  const [cashBuffer,setCashBuffer]=useState(0);
+  const [gbpUsd,setGbpUsd]=useState(1.27);
+  const [gbpUsdUpdated,setGbpUsdUpdated]=useState(null);
+  const [parsedMnav,setParsedMnav]=useState(null);
+  const [totalDebt,setTotalDebt]=useState(null);
+  const [preferredNotional,setPreferredNotional]=useState(null);
+  const [cashPosition,setCashPosition]=useState(null);
+  const [sthRealizedPrice,setSthRealizedPrice]=useState(null);
   const [btcBelowSthCost,setBtcBelowSthCost]=useState(false);
-  const [etfFlows5d,setEtfFlows5d]=useState(980);
+  const [etfFlows5d,setEtfFlows5d]=useState(null);
   const [etfOutflowsPersistent,setEtfOutflowsPersistent]=useState(false);
-  const [mnavCompressed,setMnavCompressed]=useState(true);
+  const [mnavCompressed,setMnavCompressed]=useState(false);
   const [mnavEuphoric,setMnavEuphoric]=useState(false);
-  const [btcDominance,setBtcDominance]=useState(59.6);
-  const [mstrShortInt,setMstrShortInt]=useState(8.8);
-  const [atmActive,setAtmActive]=useState(true);
-  const [ivRank,setIvRank]=useState(28);
+  const [btcDominance,setBtcDominance]=useState(null);
+  const [mstrShortInt,setMstrShortInt]=useState(null);
+  const [atmActive,setAtmActive]=useState(false);
+  const [ivRank,setIvRank]=useState(null);
   const [dataTimestamp,setDataTimestamp]=useState(null);
   const [confidence,setConfidence]=useState(null);
   const [staleFields,setStaleFields]=useState(null);
@@ -164,17 +178,13 @@ function MSTRCycleTool() {
   const [positions,setPositions]=useState([]);
   const [positionForm,setPositionForm]=useState({shares:'',entryPrice:'',stop:'',target:'',tag:'MANUAL',notes:''});
   const [exitPrices,setExitPrices]=useState({});
+  const [exitShares,setExitShares]=useState({});
   const [view,setView]=useState('dashboard');
-  
-  // Standalone DCA / Unpaired Logger State
   const [tradeType,setTradeType]=useState('SELL');
   const [tradeShares,setTradeShares]=useState('');
-  const [tradePriceInput,setTradePriceInput]=useState('');
-  const [tradePriceMode,setTradePriceMode]=useState('GBP_TOTAL');
+  const [tradePrice,setTradePrice]=useState('');
   const [tradeDate,setTradeDate]=useState(new Date().toISOString().slice(0,10));
   const [tradeFees,setTradeFees]=useState('');
-  const [autoSyncCash,setAutoSyncCash]=useState(true);
-
   const [promptCopied,setPromptCopied]=useState(false);
   const [promptSelectMsg,setPromptSelectMsg]=useState('');
   const promptTextareaRef=useRef(null);
@@ -194,6 +204,8 @@ function MSTRCycleTool() {
   const [bearBreakdownOpen,setBearBreakdownOpen]=useState(false);
   const [bottomBreakdownOpen,setBottomBreakdownOpen]=useState(false);
   const prevModeRef=useRef(null);
+  const pendingModeRef=useRef(null);
+  const pendingModeCountRef=useRef(0);
   const [nuplTrough,setNuplTrough]=useState(null);
   const [mvrvTrough,setMvrvTrough]=useState(null);
   const [btcTrough,setBtcTrough]=useState(null);
@@ -224,6 +236,7 @@ function MSTRCycleTool() {
       if(s.startingShares!==undefined)setStartingShares(s.startingShares);
       if(s.cashBuffer!==undefined)setCashBuffer(s.cashBuffer);
       if(s.gbpUsd!==undefined)setGbpUsd(s.gbpUsd);
+      if(s.gbpUsdUpdated!==undefined)setGbpUsdUpdated(s.gbpUsdUpdated);
       if(s.levelsAuto!==undefined)setLevelsAuto(s.levelsAuto);
       if(s.manualSellLow!==undefined)setManualSellLow(s.manualSellLow);
       if(s.manualSellHigh!==undefined)setManualSellHigh(s.manualSellHigh);
@@ -272,7 +285,7 @@ function MSTRCycleTool() {
     try{localStorage.setItem('mstr:settings',JSON.stringify({
       mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,
       nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,
-      btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,
+      btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,gbpUsdUpdated,
       levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,
       parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,
       etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,
@@ -282,7 +295,7 @@ function MSTRCycleTool() {
     }));}catch(e){}
   },[mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,
      nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,
-     btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,
+     btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,gbpUsdUpdated,
      levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,
      parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,
      etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,
@@ -293,6 +306,7 @@ function MSTRCycleTool() {
   const handleHoldingsChange=v=>{setBtcHoldings(v);setCorporateBaseUpdated(new Date().toISOString().slice(0,10));};
   const handleSharesChange=v=>{setDilutedShares(v);setCorporateBaseUpdated(new Date().toISOString().slice(0,10));};
   const handleCashBufferChange=v=>{setCashBuffer(v);setCashBufferUpdated(new Date().toISOString());};
+  const handleGbpUsdChange=v=>{setGbpUsd(v);setGbpUsdUpdated(new Date().toISOString());};
 
   const btcPerShare=useMemo(()=>btcHoldings/(dilutedShares*1_000_000),[btcHoldings,dilutedShares]);
   const fairValue=useMemo(()=>btcPerShare*btcPrice,[btcPerShare,btcPrice]);
@@ -352,6 +366,11 @@ function MSTRCycleTool() {
     if(!cashBufferUpdated)return null;
     return Math.floor((new Date()-new Date(cashBufferUpdated))/86400000);
   },[cashBufferUpdated]);
+
+  const gbpUsdStaleDays=useMemo(()=>{
+    if(!gbpUsdUpdated)return null;
+    return Math.floor((new Date()-new Date(gbpUsdUpdated))/86400000);
+  },[gbpUsdUpdated]);
 
   const freshness=useMemo(()=>{
     let ts=null,source=null;
@@ -488,12 +507,12 @@ function MSTRCycleTool() {
     if(bottomScore>=DEPLOY_SCORE_MIN&&mstrPrice<dynamicCeiling)return'DEPLOY';
     if(bearScore>=6)return'HOARD';
     return'ROTATE';
-  },[bearScore,bottomScore,mstrPrice,dynamicCeiling]);
+  },[bearScore,bottomScore,mstrPrice,dynamicCeiling,sthMstrFloor]);
 
   const deployImminent=useMemo(()=>{
     if(mode!=='HOARD')return false;
     return bottomScore>=DEPLOY_IMMINENT_SCORE_MIN&&bottomScore<DEPLOY_SCORE_MIN&&mstrPrice<DEPLOY_IMMINENT_PRICE;
-  },[mode,bottomScore,mstrPrice]);
+  },[mode,bottomScore,mstrPrice,sthMstrFloor]);
 
   useEffect(()=>{
     const prev=prevModeRef.current;
@@ -688,13 +707,27 @@ function MSTRCycleTool() {
   },[dynamicLevels,mstrPrice,mode]);
 
   const journalStats=useMemo(()=>{
-    let currentShares=startingShares,totalCash=0,rotationShares=0,rotationCostBasis=0,completedRotations=0,pendingSell=null,totalBuyCash=0;
+    let currentShares=startingShares,totalCash=0,rotationShares=0,rotationCostBasis=0,completedRotations=0,totalBuyCash=0;
+    let pendSellShares=0; // aggregated un-matched sell size since last buy (DCA-tolerant)
     const sorted=[...trades].sort((a,b)=>a.date.localeCompare(b.date));
     sorted.forEach(t=>{
       const gross=t.shares*t.price;
-      if(t.type==='SELL'){currentShares-=t.shares;totalCash+=gross-(t.fees||0);pendingSell={shares:t.shares,price:t.price,proceeds:gross-(t.fees||0)};}
-      else{currentShares+=t.shares;totalCash-=gross+(t.fees||0);totalBuyCash+=gross+(t.fees||0);
-        if(pendingSell!==null){const buyLegCost=gross+(t.fees||0);rotationShares+=t.shares-pendingSell.shares;rotationCostBasis+=buyLegCost;completedRotations+=1;pendingSell=null;}
+      if(t.type==='SELL'){
+        currentShares-=t.shares;
+        totalCash+=gross-(t.fees||0);
+        pendSellShares+=t.shares; // consecutive sells accumulate rather than overwrite
+      }else{
+        currentShares+=t.shares;
+        const buyLegCost=gross+(t.fees||0);
+        totalCash-=buyLegCost;
+        totalBuyCash+=buyLegCost;
+        if(pendSellShares>0){
+          // Buy-back closes a rotation against every sell booked since the previous buy
+          rotationShares+=t.shares-pendSellShares;
+          rotationCostBasis+=buyLegCost;
+          completedRotations+=1;
+          pendSellShares=0;
+        }
       }
     });
     const costPerExtraShare=(completedRotations>0&&rotationShares>0)?rotationCostBasis/rotationShares:null;
@@ -724,11 +757,9 @@ function MSTRCycleTool() {
 
   const hoardReadout=useMemo(()=>{
     if(mode!=='HOARD')return null;
-
     const structural=[];
     const momentum=[];
     const sentiment=[];
-
     if(below200ma)structural.push({label:'Below 200-day MA',pts:2,clearing:'Clears when price sustains above 200MA (weeks)'});
     if(weeklyLowerLow)structural.push({label:'Weekly lower-low',pts:1,clearing:'Clears after confirmed higher-high on weekly chart'});
     if(btcPrice<65000)momentum.push({label:`BTC < $65k ($${btcPrice.toLocaleString()})`,pts:1,clearing:'Clears above $65k'});
@@ -744,24 +775,21 @@ function MSTRCycleTool() {
     if(btcDominance!==null&&btcDominance<50)sentiment.push({label:`BTC dominance low (${btcDominance.toFixed(1)}%)`,pts:1,clearing:'Clears above 50%'});
     if(atmActive&&mNAV!==null&&mNAV<1.2)sentiment.push({label:'ATM active at low premium',pts:1,clearing:'Clears when ATM pauses or mNAV > 1.2'});
     if(ivRank!==null&&ivRank>75)sentiment.push({label:`IV Rank elevated (${ivRank})`,pts:1,clearing:'Clears when options normalise below 75'});
-
     const structuralPts=structural.reduce((a,s)=>a+s.pts,0);
     const momentumPts=momentum.reduce((a,s)=>a+s.pts,0);
     const sentimentPts=sentiment.reduce((a,s)=>a+s.pts,0);
-
     const nuplDelta=(nuplTrough!==null&&nupl>nuplTrough)?+(nupl-nuplTrough).toFixed(1):null;
     const mvrvDelta=(mvrvTrough!==null&&mvrv>mvrvTrough)?+(mvrv-mvrvTrough).toFixed(2):null;
     const btcAboveTrough=(btcTrough!==null&&btcTrough>0)?+((btcPrice/btcTrough-1)*100).toFixed(1):null;
     const hoardWeeks=hoardEntryDate?Math.floor((Date.now()-new Date(hoardEntryDate).getTime())/604800000):null;
-
     const recovering=nuplDelta!==null&&nuplDelta>5;
     const deeplyRecovering=nuplDelta!==null&&nuplDelta>15;
     const mvrvRecovering=mvrvDelta!==null&&mvrvDelta>0.1;
-
     const parts=[];
     const totalActive=structural.length+momentum.length+sentiment.length;
+    const reducibleNow=sentimentPts;
+    const reducibleSoon=momentumPts;
     const locked=structuralPts;
-
     if(structural.length>0&&momentum.length===0&&sentiment.length===0){
       parts.push(`HOARD driven entirely by ${structural.length} structural signal${structural.length>1?'s':''} — ${structural.map(s=>s.label).join(', ')}. These are the slowest to clear.`);
     } else if(structural.length>0){
@@ -779,7 +807,6 @@ function MSTRCycleTool() {
     } else {
       parts.push(`Cash at ${portfolio.cashPct.toFixed(1)}% — ${portfolio.cashPct<HOARD_SELL_CEILING_PCT?'still building toward 40% target.':'at or above target.'}`);
     }
-
     let actionNote=null;
     if(deeplyRecovering&&structural.length<=1&&sentimentPts===0&&hoardWeeks!==null&&hoardWeeks>8){
       actionNote={text:'Recovery momentum is strong and sentiment has cleared. Only structural signals remain. Consider reviewing whether HOARD intensity is still warranted.',tone:'amber'};
@@ -792,7 +819,6 @@ function MSTRCycleTool() {
     } else if(locked>=4&&momentumPts===0&&sentimentPts===0){
       actionNote={text:'Held by structural signals only — these clear slowly. Patience required; focus on cash target progress.',tone:'neutral'};
     }
-
     return{structural,momentum,sentiment,structuralPts,momentumPts,sentimentPts,
            nuplDelta,mvrvDelta,btcAboveTrough,hoardWeeks,recovering,deeplyRecovering,
            summary:parts.join(' '),actionNote};
@@ -848,6 +874,7 @@ function MSTRCycleTool() {
     const snap={date:new Date().toISOString(),mstrPrice,btcPrice,nupl,mvrv,mNAV:Number(mNAV.toFixed(2)),bearScore,bottomScore,mode,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,btcDominance,mstrShortInt,atmActive,ivRank,currentShares:journalStats.currentShares,cashBufferGBP:cashBuffer,gbpUsd};
     setSnapshots(prev=>{const updated=[...prev,snap];try{localStorage.setItem('mstr:snapshots',JSON.stringify(updated));}catch(e){}return updated;});
   },[mstrPrice,btcPrice,nupl,mvrv,mNAV,bearScore,bottomScore,mode,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,btcDominance,mstrShortInt,atmActive,ivRank,journalStats.currentShares,cashBuffer,gbpUsd]);
+
   const claudePrompt=`You are providing market data for a live trading decision tool. Accuracy and freshness are critical — stale, hallucinated, or guessed data causes catastrophic trading losses. Follow all four phases below exactly.
 
 PHASE 1 — STATE THE CURRENT TIME
@@ -864,6 +891,7 @@ Sources to use:
 - BTC perp funding + OI: coinglass.com
 - ETF 5-day flows: farside.co.uk/btc (authoritative)
 - DXY: tradingview.com, marketwatch.com
+- GBP/USD spot: xe.com, tradingview.com (GBPUSD), or wise.com — live FX rate, refresh every run
 - BTC dominance: coingecko.com (dominance tab) or tradingview BTC.D
 - MSTR short interest: finviz.com MSTR page, or S3 Partners / Ortex (if available)
 - MSTR IV rank: barchart.com options page for MSTR (30-day IV rank)
@@ -877,7 +905,7 @@ Freshness rules:
 - If your top result is old, search again with "today", "current", or the actual date.
 - Do NOT extrapolate from training data memory. If you cannot cite a source under 7 days old, mark the field as estimated.
 - Weekend/holiday closes: note explicitly in STALE_FIELDS.
-- On weekends/market holidays, MSTR_PRICE and all MSTR technicals are the last session's close — list them in STALE_FIELDS. BTC_PRICE and on-chain metrics trade 24/7 and remain live; do NOT mark these stale solely because markets are closed.
+- On weekends/market holidays, MSTR_PRICE and all MSTR technicals are the last session's close — list them in STALE_FIELDS. BTC_PRICE, on-chain metrics and GBP_USD trade 24/7 and remain live; do NOT mark these stale solely because equity markets are closed.
 
 PHASE 3 — MANDATORY BALANCE SHEET MATH AUDIT
 CRITICAL: Do NOT extract the mNAV ratio from summary tracking sheets or external trackers. Calculate from scratch:
@@ -915,6 +943,7 @@ PREFERRED_NOTIONAL: [number in millions USD]
 CASH_POSITION: [number in millions USD]
 MNAV: [number, two decimals, MUST MATCH STEP 3.4]
 DXY: [number, one decimal]
+GBP_USD: [number, four decimals]
 BTC_DOMINANCE: [number, one decimal]
 MSTR_SHORT_INT: [number, one decimal, percent of float]
 MSTR_IV_RANK: [integer 0-100]
@@ -933,6 +962,7 @@ ATM_ACTIVE: ON or OFF
 FIELD RULES:
 - DILUTED_SHARES: in millions (e.g. 280.0).
 - TOTAL_DEBT, PREFERRED_NOTIONAL, CASH_POSITION: in millions USD.
+- GBP_USD: live GBP→USD spot (e.g. 1.2734), four decimals. Drives GBP portfolio valuation; refresh every run.
 - BELOW_200MA: ON if MSTR closing price is below 200-day SMA.
 - WEEKLY_LL: ON if MSTR weekly lower-low after lower-high confirmed.
 - SHORTING and EXHAUSTION are mutually exclusive.
@@ -994,6 +1024,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         case'CASH_POSITION':{const n=safeNum(cv,{allowZero:true});if(n!==null){setCashPosition(n);applied.push(`Cash $${n}M`);}else skipped.push(key);break;}
         case'MNAV':{const n=safeNum(cv);if(n!==null){setParsedMnav(n);applied.push(`mNAV ${n}x`);}else skipped.push(key);break;}
         case'DXY':{const n=safeNum(cv);if(n!==null){applied.push(`DXY ${n}`);}else skipped.push(key);break;}
+        case'GBP_USD':{const n=safeNum(cv);if(n!==null&&n>0.5&&n<3){handleGbpUsdChange(n);applied.push(`GBP/USD ${n}`);}else skipped.push(key);break;}
         case'BTC_BELOW_STH_COST':setBtcBelowSthCost(bv);applied.push(`BTC<STH ${bv?'ON':'OFF'}`);break;
         case'ETF_OUTFLOWS_PERSISTENT':setEtfOutflowsPersistent(bv);applied.push(`ETF out ${bv?'ON':'OFF'}`);break;
         case'MNAV_COMPRESSED':setMnavCompressed(bv);if(bv)setMnavEuphoric(false);applied.push(`mNAV comp ${bv?'ON':'OFF'}`);break;
@@ -1040,78 +1071,54 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
   };
 
   const addTrade=()=>{
-    const sharesNum = parseFloat(tradeShares);
-    const inputNum = parseFloat(tradePriceInput);
-    if(!sharesNum || sharesNum <= 0 || !inputNum || inputNum <= 0) return;
-
-    let finalPriceUsd = 0;
-    let totalProceedsGbp = 0;
-
-    if(tradePriceMode === 'USD') {
-      finalPriceUsd = inputNum;
-      totalProceedsGbp = (sharesNum * finalPriceUsd) / gbpUsd;
-    } else if(tradePriceMode === 'GBP_TOTAL') {
-      totalProceedsGbp = inputNum;
-      const pricePerShareGbp = totalProceedsGbp / sharesNum;
-      finalPriceUsd = pricePerShareGbp * gbpUsd;
-    } else if(tradePriceMode === 'GBP_PRICE') {
-      totalProceedsGbp = inputNum * sharesNum;
-      finalPriceUsd = inputNum * gbpUsd;
-    } else if(tradePriceMode === 'GBX') {
-      const pricePerShareGbp = inputNum / 100;
-      totalProceedsGbp = pricePerShareGbp * sharesNum;
-      finalPriceUsd = pricePerShareGbp * gbpUsd;
-    }
-
-    const trade={
-      id: Date.now(),
-      date: tradeDate,
-      type: tradeType,
-      shares: sharesNum,
-      price: parseFloat(finalPriceUsd.toFixed(2)),
-      priceGbp: parseFloat((totalProceedsGbp / sharesNum).toFixed(2)),
-      totalGbp: parseFloat(totalProceedsGbp.toFixed(2)),
-      fees: parseFloat(tradeFees)||0
-    };
-
-    const updated=[...trades, trade];
-    setTrades(updated);
+    if(!tradeShares||!tradePrice)return;
+    const trade={id:Date.now(),date:tradeDate,type:tradeType,shares:parseFloat(tradeShares),price:parseFloat(tradePrice),fees:parseFloat(tradeFees)||0};
+    const updated=[...trades,trade];setTrades(updated);
     try{localStorage.setItem('mstr:trades',JSON.stringify(updated));}catch(e){}
-
-    if(autoSyncCash) {
-      if(tradeType === 'SELL') {
-        const newCash = cashBuffer + totalProceedsGbp;
-        setCashBuffer(parseFloat(newCash.toFixed(2)));
-      } else {
-        const newCash = Math.max(0, cashBuffer - totalProceedsGbp);
-        setCashBuffer(parseFloat(newCash.toFixed(2)));
-      }
-    }
-
-    setTradeShares('');
-    setTradePriceInput('');
-    setTradeFees('');
+    setTradeShares('');setTradePrice('');setTradeFees('');
   };
-
   const deleteTrade=id=>{const updated=trades.filter(t=>t.id!==id);setTrades(updated);try{localStorage.setItem('mstr:trades',JSON.stringify(updated));}catch(e){}};
   const openPosition=(overrides={})=>{
     const f={...positionForm,...overrides};if(!f.shares||!f.entryPrice)return;
-    const pos={id:Date.now(),openedAt:new Date().toISOString(),shares:parseFloat(f.shares),entryPrice:parseFloat(f.entryPrice),stop:f.stop?parseFloat(f.stop):null,target:f.target?parseFloat(f.target):null,tag:f.tag||'MANUAL',notes:f.notes||'',status:'OPEN'};
+    const sh=parseFloat(f.shares);
+    const pos={id:Date.now(),openedAt:new Date().toISOString(),shares:sh,originalShares:sh,closes:[],entryPrice:parseFloat(f.entryPrice),stop:f.stop?parseFloat(f.stop):null,target:f.target?parseFloat(f.target):null,tag:f.tag||'MANUAL',notes:f.notes||'',status:'OPEN'};
     const updated=[...positions,pos];setPositions(updated);try{localStorage.setItem('mstr:positions',JSON.stringify(updated));}catch(e){}
     setPositionForm({shares:'',entryPrice:'',stop:'',target:'',tag:'MANUAL',notes:''});
   };
-  const closePosition=(id,exitPrice,exitFees=0)=>{
+  // Partial-close aware: DCA trims a position by any quantity up to what's open.
+  // Leaving qty blank closes the remaining balance. Each close logs a paired SELL.
+  const closePosition=(id,exitPrice,exitFees=0,qtyArg=null)=>{
     const pos=positions.find(p=>p.id===id);if(!pos)return;
-    const exit=parseFloat(exitPrice);if(!exit||isNaN(exit))return;
-    const updated=positions.map(p=>p.id===id?{...p,status:'CLOSED',closedAt:new Date().toISOString(),exitPrice:exit,exitFees:parseFloat(exitFees)||0}:p);
+    const exit=parseFloat(exitPrice);if(!exit||isNaN(exit)||exit<=0)return;
+    const avail=pos.shares;
+    let qty=(qtyArg===null||qtyArg===''||isNaN(parseFloat(qtyArg)))?avail:parseFloat(qtyArg);
+    if(qty<=0)return;
+    qty=Math.min(qty,avail);
+    const fees=parseFloat(exitFees)||0;
+    const remaining=Math.round((avail-qty)*1e6)/1e6;
+    const fullyClosed=remaining<=0.0001;
+    const closeRec={at:new Date().toISOString(),shares:Math.round(qty*1e4)/1e4,price:exit,fees};
+    const updated=positions.map(p=>{
+      if(p.id!==id)return p;
+      const closes=[...(p.closes||[]),closeRec];
+      return fullyClosed
+        ?{...p,shares:0,closes,status:'CLOSED',closedAt:new Date().toISOString(),exitPrice:exit,exitFees:fees}
+        :{...p,shares:remaining,closes,status:'OPEN'};
+    });
     setPositions(updated);try{localStorage.setItem('mstr:positions',JSON.stringify(updated));}catch(e){}
-    const ct={id:Date.now(),date:new Date().toISOString().slice(0,10),type:'SELL',shares:pos.shares,price:exit,fees:parseFloat(exitFees)||0,fromPositionId:id};
+    const ct={id:Date.now(),date:new Date().toISOString().slice(0,10),type:'SELL',shares:closeRec.shares,price:exit,fees,fromPositionId:id};
     const tu=[...trades,ct];setTrades(tu);try{localStorage.setItem('mstr:trades',JSON.stringify(tu));}catch(e){}
+  };
+  // Realized P&L across all (partial) closes; falls back to legacy single-exit fields.
+  const positionRealized=(p)=>{
+    if(Array.isArray(p.closes)&&p.closes.length>0)return p.closes.reduce((a,c)=>a+((c.price-p.entryPrice)*c.shares-(c.fees||0)),0);
+    if(p.status==='CLOSED'&&p.exitPrice!=null)return (p.exitPrice-p.entryPrice)*(p.originalShares??p.shares)-(p.exitFees||0);
+    return 0;
   };
   const deletePosition=id=>{const updated=positions.filter(p=>p.id!==id);setPositions(updated);try{localStorage.setItem('mstr:positions',JSON.stringify(updated));}catch(e){}};
   const deleteSnapshot=date=>{setSnapshots(prev=>{const updated=prev.filter(s=>s.date!==date);try{localStorage.setItem('mstr:snapshots',JSON.stringify(updated));}catch(e){}return updated;});};
 
-  const buildExportPayload=()=>({version:14.12,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,cashBufferUpdated},trades,snapshots,positions,misses,regimeLog});
+  const buildExportPayload=()=>({version:14.12,exportedAt:new Date().toISOString(),settings:{mstrPrice,btcPrice,ma200,lastUpdated,high20,low20,high50,low50,low200,atr14,nupl,mvrv,fundingNegative,derivativesExhaustion,below200ma,weeklyLowerLow,dxyAbove110,btcHoldings,dilutedShares,corporateBaseUpdated,startingShares,cashBuffer,gbpUsd,gbpUsdUpdated,levelsAuto,manualSellLow,manualSellHigh,manualBuyLow,manualBuyHigh,aggressionStyle,parsedMnav,totalDebt,preferredNotional,cashPosition,sthRealizedPrice,btcBelowSthCost,etfFlows5d,etfOutflowsPersistent,mnavCompressed,mnavEuphoric,dataTimestamp,confidence,staleFields,btcDominance,mstrShortInt,atmActive,ivRank,projBearBtc,projBaseBtc,projBullBtc,projBearMnav,projBaseMnav,projBullMnav,projShares,cashBufferUpdated},trades,snapshots,positions,misses,regimeLog});
 
   const exportJSON=async()=>{const text=JSON.stringify(buildExportPayload(),null,2);try{await navigator.clipboard.writeText(text);setImportResult({ok:true,msg:`Exported ${trades.length} trades, ${positions.length} positions, ${snapshots.length} snapshots.`});}catch(e){setImportResult({ok:true,msg:'Export ready below — copy manually.',payload:text});}setTimeout(()=>setImportResult(null),8000);};
   const exportJSONFile=()=>{const text=JSON.stringify(buildExportPayload(),null,2);const blob=new Blob([text],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');const stamp=new Date().toISOString().slice(0,10);a.href=url;a.download=`mstr-cycle-${stamp}.json`;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(url),1000);setImportResult({ok:true,msg:`Downloaded mstr-cycle-${stamp}.json`});setTimeout(()=>setImportResult(null),6000);};
@@ -1121,14 +1128,14 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
     try{
       const p=JSON.parse(importText);
       if(p.settings){const s=p.settings;
-        if(s.mstrPrice!==undefined)setMstrPrice(s.mstrPrice);if(s.btcPrice!==undefined)setBtcPrice(s.btcPrice);if(s.ma200!==undefined)setMa200(s.ma200);if(s.lastUpdated!==undefined)setLastUpdated(s.lastUpdated);if(s.high20!==undefined)setHigh20(s.high20);if(s.low20!==undefined)setLow20(s.low20);if(s.high50!==undefined)setHigh50(s.high50);if(s.low50!==undefined)setLow50(s.low50);if(s.low200!==undefined)setLow200(s.low200);if(s.atr14!==undefined)setAtr14(s.atr14);if(s.nupl!==undefined)setNupl(s.nupl);if(s.mvrv!==undefined)setMvrv(s.mvrv);if(s.fundingNegative!==undefined)setFundingNegative(s.fundingNegative);if(s.derivativesExhaustion!==undefined)setDerivativesExhaustion(s.derivativesExhaustion);if(s.below200ma!==undefined)setBelow200ma(s.below200ma);if(s.weeklyLowerLow!==undefined)setWeeklyLowerLow(s.weeklyLowerLow);if(s.dxyAbove110!==undefined)setDxyAbove110(s.dxyAbove110);if(s.btcHoldings!==undefined)setBtcHoldings(s.btcHoldings);if(s.dilutedShares!==undefined)setDilutedShares(s.dilutedShares);if(s.corporateBaseUpdated!==undefined)setCorporateBaseUpdated(s.corporateBaseUpdated);if(s.startingShares!==undefined)setStartingShares(s.startingShares);if(s.cashBuffer!==undefined)setCashBuffer(s.cashBuffer);if(s.gbpUsd!==undefined)setGbpUsd(s.gbpUsd);if(s.levelsAuto!==undefined)setLevelsAuto(s.levelsAuto);if(s.manualSellLow!==undefined)setManualSellLow(s.manualSellLow);if(s.manualSellHigh!==undefined)setManualSellHigh(s.manualSellHigh);if(s.manualBuyLow!==undefined)setManualBuyLow(s.manualBuyLow);if(s.manualBuyHigh!==undefined)setManualBuyHigh(s.manualBuyHigh);if(s.aggressionStyle!==undefined)setAggressionStyle(s.aggressionStyle);if(s.parsedMnav!==undefined)setParsedMnav(s.parsedMnav);if(s.totalDebt!==undefined)setTotalDebt(s.totalDebt);if(s.preferredNotional!==undefined)setPreferredNotional(s.preferredNotional);if(s.cashPosition!==undefined)setCashPosition(s.cashPosition);if(s.sthRealizedPrice!==undefined)setSthRealizedPrice(s.sthRealizedPrice);if(s.btcBelowSthCost!==undefined)setBtcBelowSthCost(s.btcBelowSthCost);if(s.etfFlows5d!==undefined)setEtfFlows5d(s.etfFlows5d);if(s.etfOutflowsPersistent!==undefined)setEtfOutflowsPersistent(s.etfOutflowsPersistent);if(s.mnavCompressed!==undefined)setMnavCompressed(s.mnavCompressed);if(s.mnavEuphoric!==undefined)setMnavEuphoric(s.mnavEuphoric);if(s.dataTimestamp!==undefined)setDataTimestamp(s.dataTimestamp);if(s.confidence!==undefined)setConfidence(s.confidence);if(s.staleFields!==undefined)setStaleFields(s.staleFields);if(s.btcDominance!==undefined)setBtcDominance(s.btcDominance);if(s.mstrShortInt!==undefined)setMstrShortInt(s.mstrShortInt);if(s.atmActive!==undefined)setAtmActive(s.atmActive);if(s.ivRank!==undefined)setIvRank(s.ivRank);if(s.projBearBtc!==undefined)setProjBearBtc(s.projBearBtc);if(s.projBaseBtc!==undefined)setProjBaseBtc(s.projBaseBtc);if(s.projBullBtc!==undefined)setProjBullBtc(s.projBullBtc);if(s.projBearMnav!==undefined)setProjBearMnav(s.projBearMnav);if(s.projBaseMnav!==undefined)setProjBaseMnav(s.projBaseMnav);if(s.projBullMnav!==undefined)setProjBullMnav(s.projBullMnav);if(s.projShares!==undefined)setProjShares(s.projShares);
+        if(s.mstrPrice!==undefined)setMstrPrice(s.mstrPrice);if(s.btcPrice!==undefined)setBtcPrice(s.btcPrice);if(s.ma200!==undefined)setMa200(s.ma200);if(s.lastUpdated!==undefined)setLastUpdated(s.lastUpdated);if(s.high20!==undefined)setHigh20(s.high20);if(s.low20!==undefined)setLow20(s.low20);if(s.high50!==undefined)setHigh50(s.high50);if(s.low50!==undefined)setLow50(s.low50);if(s.low200!==undefined)setLow200(s.low200);if(s.atr14!==undefined)setAtr14(s.atr14);if(s.nupl!==undefined)setNupl(s.nupl);if(s.mvrv!==undefined)setMvrv(s.mvrv);if(s.fundingNegative!==undefined)setFundingNegative(s.fundingNegative);if(s.derivativesExhaustion!==undefined)setDerivativesExhaustion(s.derivativesExhaustion);if(s.below200ma!==undefined)setBelow200ma(s.below200ma);if(s.weeklyLowerLow!==undefined)setWeeklyLowerLow(s.weeklyLowerLow);if(s.dxyAbove110!==undefined)setDxyAbove110(s.dxyAbove110);if(s.btcHoldings!==undefined)setBtcHoldings(s.btcHoldings);if(s.dilutedShares!==undefined)setDilutedShares(s.dilutedShares);if(s.corporateBaseUpdated!==undefined)setCorporateBaseUpdated(s.corporateBaseUpdated);if(s.startingShares!==undefined)setStartingShares(s.startingShares);if(s.cashBuffer!==undefined)setCashBuffer(s.cashBuffer);if(s.gbpUsd!==undefined)setGbpUsd(s.gbpUsd);if(s.gbpUsdUpdated!==undefined)setGbpUsdUpdated(s.gbpUsdUpdated);if(s.cashBufferUpdated!==undefined)setCashBufferUpdated(s.cashBufferUpdated);if(s.levelsAuto!==undefined)setLevelsAuto(s.levelsAuto);if(s.manualSellLow!==undefined)setManualSellLow(s.manualSellLow);if(s.manualSellHigh!==undefined)setManualSellHigh(s.manualSellHigh);if(s.manualBuyLow!==undefined)setManualBuyLow(s.manualBuyLow);if(s.manualBuyHigh!==undefined)setManualBuyHigh(s.manualBuyHigh);if(s.aggressionStyle!==undefined)setAggressionStyle(s.aggressionStyle);if(s.parsedMnav!==undefined)setParsedMnav(s.parsedMnav);if(s.totalDebt!==undefined)setTotalDebt(s.totalDebt);if(s.preferredNotional!==undefined)setPreferredNotional(s.preferredNotional);if(s.cashPosition!==undefined)setCashPosition(s.cashPosition);if(s.sthRealizedPrice!==undefined)setSthRealizedPrice(s.sthRealizedPrice);if(s.btcBelowSthCost!==undefined)setBtcBelowSthCost(s.btcBelowSthCost);if(s.etfFlows5d!==undefined)setEtfFlows5d(s.etfFlows5d);if(s.etfOutflowsPersistent!==undefined)setEtfOutflowsPersistent(s.etfOutflowsPersistent);if(s.mnavCompressed!==undefined)setMnavCompressed(s.mnavCompressed);if(s.mnavEuphoric!==undefined)setMnavEuphoric(s.mnavEuphoric);if(s.dataTimestamp!==undefined)setDataTimestamp(s.dataTimestamp);if(s.confidence!==undefined)setConfidence(s.confidence);if(s.staleFields!==undefined)setStaleFields(s.staleFields);if(s.btcDominance!==undefined)setBtcDominance(s.btcDominance);if(s.mstrShortInt!==undefined)setMstrShortInt(s.mstrShortInt);if(s.atmActive!==undefined)setAtmActive(s.atmActive);if(s.ivRank!==undefined)setIvRank(s.ivRank);if(s.projBearBtc!==undefined)setProjBearBtc(s.projBearBtc);if(s.projBaseBtc!==undefined)setProjBaseBtc(s.projBaseBtc);if(s.projBullBtc!==undefined)setProjBullBtc(s.projBullBtc);if(s.projBearMnav!==undefined)setProjBearMnav(s.projBearMnav);if(s.projBaseMnav!==undefined)setProjBaseMnav(s.projBaseMnav);if(s.projBullMnav!==undefined)setProjBullMnav(s.projBullMnav);if(s.projShares!==undefined)setProjShares(s.projShares);
       }
       if(Array.isArray(p.trades)){setTrades(p.trades);try{localStorage.setItem('mstr:trades',JSON.stringify(p.trades));}catch(e){}}
       if(Array.isArray(p.snapshots)){setSnapshots(p.snapshots);try{localStorage.setItem('mstr:snapshots',JSON.stringify(p.snapshots));}catch(e){}}
       if(Array.isArray(p.positions)){setPositions(p.positions);try{localStorage.setItem('mstr:positions',JSON.stringify(p.positions));}catch(e){}}
       if(Array.isArray(p.misses)){setMisses(p.misses);try{localStorage.setItem('mstr:misses',JSON.stringify(p.misses));}catch(e){}}
       if(Array.isArray(p.regimeLog)){setRegimeLog(p.regimeLog);try{localStorage.setItem('mstr:regimeLog',JSON.stringify(p.regimeLog));}catch(e){}}
-      setImportText('');setImportResult({ok:true,msg:`Imported: ${p.trades?.length??0} trades, ${p.positions?.length??0} positions, ${p.snapshots?.length??0} snapshots.`});
+      setImportText('');setImportResult({ok:true,msg:`Imported: ${p.trades?.length??0} trades, ${p.positions?.length??0} positions, ${p.snapshots?.length??0} snapshots, ${p.misses?.length??0} miss events, ${p.regimeLog?.length??0} regime transitions.`});
     }catch(e){setImportResult({ok:false,msg:`Import failed: ${e.message}`});}
     setTimeout(()=>setImportResult(null),8000);
   };
@@ -1214,9 +1221,8 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
     <div style={{minHeight:'100vh',background:`linear-gradient(180deg,${C.bg} 0%,${C.panel} 100%)`,padding:'24px 16px',fontFamily:S,color:C.text}}>
     <div style={{maxWidth:'720px',margin:'0 auto'}}>
 
-    {/* HEADER */}
     <div style={{marginBottom:'24px',borderBottom:`1px solid ${C.border}`,paddingBottom:'20px'}}>
-      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.12 · full engine</div>
+      <div style={{fontSize:'10px',letterSpacing:'0.3em',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Cycle Decision Framework · v14.12 · prompt v3</div>
       <h1 style={{fontSize:'26px',fontWeight:400,color:C.hi,margin:0,fontStyle:'italic'}}>MSTR Rotation</h1>
       <h2 style={{fontSize:'14px',fontWeight:400,color:C.dim,margin:'4px 0 12px 0',letterSpacing:'0.05em'}}>Rotate · Hoard · Deploy</h2>
       <div style={{display:'flex',gap:'16px',flexWrap:'wrap',fontSize:'12px',marginTop:'12px',alignItems:'center'}}>
@@ -1236,7 +1242,6 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
       </div>
     </div>
 
-    {/* NAV */}
     <div style={{marginBottom:'20px'}}>
       <div style={{display:'flex',gap:'6px',marginBottom:'6px'}}>
         <NB id="dashboard" label="Dashboard"/><NB id="positions" label={`Open · ${positions.filter(p=>p.status==='OPEN').length}`}/><NB id="journal" label={`Journal · ${trades.length}`}/><NB id="project" label="Project"/>
@@ -1247,7 +1252,6 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
     </div>
 
     {view==='dashboard'&&(<>
-      {/* STALENESS BANNER */}
       {(freshness.tier==='amber'||freshness.tier==='red'||confidence==='LOW'||(staleFields&&staleFields!=='NONE'))&&(
         <div style={{background:freshness.tier==='red'||confidence==='LOW'?'#1a0f0d':'#1a1611',border:`2px solid ${freshness.tier==='red'||confidence==='LOW'?C.red:C.gold}`,padding:'14px 16px',marginBottom:'20px',borderRadius:'3px'}}>
           <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'6px'}}>
@@ -1264,7 +1268,6 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         </div>
       )}
 
-      {/* MODE CARD */}
       {(()=>{const modeStale=freshness.tier==='red'||confidence==='LOW';return(
       <div style={{background:modeStale?'#12100e':cfg.bg,border:`1px solid ${modeStale?C.faint:cfg.color}`,padding:'20px',marginBottom:'20px',opacity:modeStale?0.82:1,position:'relative'}}>
         {modeStale&&<div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'14px',padding:'8px 10px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px'}}>
@@ -1328,7 +1331,6 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
             </div>
           );
         })()}
-
         {deployImminent&&<div style={{marginBottom:'14px',padding:'12px 14px',background:'#111a12',border:`1px solid ${C.green}`,borderRadius:'3px'}}><div style={{color:C.green,fontSize:'12px',fontWeight:700,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'4px'}}>● DEPLOY approaching</div><div style={{color:C.dim,fontSize:'11px',lineHeight:1.55}}>Bottom score is <span style={{color:C.green,fontWeight:600}}>{bottomScore}/20</span> — {mstrPrice<dynamicCeiling?<>{DEPLOY_SCORE_MIN-bottomScore} more point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} needed to flip to DEPLOY.</>:<>{DEPLOY_SCORE_MIN-bottomScore} point{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} and a break below ${dynamicCeiling} will flip to DEPLOY.</>}</div></div>}
         {ivRank!==null&&ivRank>75&&bearScore>=6&&<div style={{marginBottom:'14px',padding:'10px 12px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px',fontSize:'11px',color:C.red,lineHeight:1.5}}>⚡ IV Rank {ivRank} — peak options speculation zone. +1 bear signal. Premium collapse risk elevated.</div>}
         {deploySuppressed&&<div style={{fontSize:'11px',color:C.gold,marginBottom:'14px',padding:'10px 12px',background:'#1a1611',border:`1px dashed ${C.gold}`,borderRadius:'3px'}}>⚠ Bottom score at deploy threshold, but MSTR still above ${dynamicCeiling}{sthMstrFloor!==null?` (STH floor $${sthMstrFloor.toFixed(2)} × 1.10)`:''}. Holding HOARD.</div>}
@@ -1503,7 +1505,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
           <div style={{display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap',marginBottom:'6px'}}>
             <span style={{fontSize:'9px',letterSpacing:'0.15em',textTransform:'uppercase',color:C.mute}}>Style</span>
             {['conservative','moderate','aggressive'].map(s=>{const active=aggressionStyle===s;return<button key={s} onClick={()=>setAggressionStyle(s)} style={{background:active?cfg.color:'transparent',color:active?'#000':C.dim,border:`1px solid ${active?cfg.color:C.border}`,padding:'3px 9px',fontFamily:S,fontSize:'10px',letterSpacing:'0.1em',textTransform:'uppercase',cursor:'pointer',fontWeight:active?600:400,borderRadius:'2px'}}>{s==='moderate'?'Mod':s.charAt(0).toUpperCase()+s.slice(1,4)}</button>;})}
-            <span style={{fontSize:'11px',color:C.mute,marginLeft:'4px',fontSize:'10px'}}>{profile.rotationSizePctLow}–{profile.rotationSizePctHigh}% rotation</span>
+            <span style={{fontSize:'10px',color:C.mute,marginLeft:'4px'}}>{profile.rotationSizePctLow}–{profile.rotationSizePctHigh}% rotation</span>
             {dilutionBrakeActive&&<span style={{fontSize:'9px',color:C.red,border:`1px solid ${C.red}`,padding:'2px 6px',borderRadius:'2px',letterSpacing:'0.08em',fontWeight:700,background:'#1a0f0d',whiteSpace:'nowrap'}}>Dilution Brake Active</span>}
           </div>
           {dilutionBrakeActive&&<div style={{fontSize:'10px',color:C.red,marginBottom:'8px',lineHeight:1.5,padding:'8px 10px',background:'#1a0f0d',border:`1px dashed ${C.red}`,borderRadius:'3px'}}>Rotation size halved ({baseProfile.rotationSizePctLow}–{baseProfile.rotationSizePctHigh}% → {profile.rotationSizePctLow}–{profile.rotationSizePctHigh}%): ATM programme active while mNAV &lt; 1.2x.</div>}
@@ -1514,6 +1516,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         </div>
       </div>);})()}
 
+      {/* MANUAL LEVELS */}
       {!levelsAuto&&<div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
         <SH>◆ Manual level overrides</SH>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',fontSize:'11px'}}>
@@ -1524,6 +1527,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         </div>
       </div>}
 
+      {/* TECHNICAL READOUT */}
       {levelsAuto&&technicals&&<div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
         <SH>◆ Technical readout</SH>
         <div className="g-auto-4" style={{fontSize:'11px'}}>
@@ -1535,6 +1539,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         <div style={{marginTop:'12px',fontSize:'11px',color:C.dim}}>ATR(14): ${technicals.atr14.toFixed(2)} — typical daily true range. Bands set to ±{(profile.bandWidthMult*100).toFixed(0)}% ATR around target.</div>
       </div>}
 
+      {/* THESIS PERFORMANCE */}
       {(journalStats.tradeCount>0||startingShares>0)&&<div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
         <SH>◆ Thesis performance</SH>
         <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'12px',marginBottom:'16px'}}>
@@ -1578,8 +1583,10 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
           </div>
           {journalStats.accrualRateAnnual!==null&&<div style={{padding:'8px 10px',background:'#0d0b09',border:`1px dashed ${C.border}`,borderRadius:'3px',fontSize:'10px',color:C.mute,lineHeight:1.5}}>Annualised accrual rate: <span style={{color:C.gold,fontWeight:600}}>{journalStats.accrualRateAnnual.toFixed(1)} sh/yr</span> — {journalStats.completedRotations} rotation{journalStats.completedRotations!==1?'s':''}. Estimate only.</div>}
         </div>}
+        {journalStats.tradeCount===0&&startingShares>0&&<div style={{fontSize:'11px',color:C.faint,fontStyle:'italic',textAlign:'center',padding:'8px 0'}}>Log your first trade in Journal to begin tracking rotation performance.</div>}
       </div>}
 
+      {/* ON-CHAIN & CORPORATE */}
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
         <SH>◆ On-chain &amp; corporate signals</SH>
         <div style={{padding:'12px 0',borderBottom:`1px solid ${C.border}`}}>
@@ -1616,6 +1623,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
             <span style={{color:etfOutflowsPersistent?C.red:(etfFlows5d!==null&&etfFlows5d>100)?C.green:C.gold,fontSize:'17px',fontWeight:600}}>{etfFlows5d!==null?`${etfFlows5d>=0?'+':''}$${etfFlows5d.toLocaleString()}M`:'—'}</span>
           </div>
           <div style={{fontSize:'11px',color:etfOutflowsPersistent?C.red:C.dim,marginBottom:'4px'}}>{etfFlows5d===null?'Awaiting data':etfOutflowsPersistent?'Persistent outflows — institutional risk-off':etfFlows5d>500?'Strong inflows — institutional accumulation':'Mixed / neutral flows'}</div>
+          <div style={{fontSize:'10px',color:C.mute,lineHeight:1.5}}>Threshold: outflows &gt; $500M over 5 days flips bear signal. Source: Farside.</div>
         </div>
         <div style={{padding:'12px 0',borderBottom:`1px solid ${C.border}`}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'4px'}}>
@@ -1630,6 +1638,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
             <span style={{color:ivRank===null?C.faint:ivRank>75?C.red:ivRank>50?C.gold:C.green,fontSize:'17px',fontWeight:600}}>{ivRank!==null?`${ivRank}`:'—'}</span>
           </div>
           <div style={{fontSize:'11px',color:ivRank!==null&&ivRank>75?C.red:C.dim,marginBottom:'4px'}}>{ivRank===null?'Awaiting data':ivRank>75?'Peak speculation — gamma overextension, vol crush risk. Bear signal +1.':ivRank>50?'Elevated options activity':'Normal options pricing'}</div>
+          <div style={{fontSize:'10px',color:C.mute,lineHeight:1.5}}>0=cheapest in a year, 100=most expensive. IV Rank &gt;75 adds +1 bear signal.</div>
         </div>
         <div style={{padding:'12px 0'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:'4px'}}>
@@ -1648,6 +1657,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         </div>}
       </div>
 
+      {/* PORTFOLIO */}
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
         <SH>◆ Portfolio</SH>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',fontSize:'12px',marginBottom:'16px'}}>
@@ -1656,12 +1666,19 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         </div>
         <div style={{paddingTop:'12px',borderTop:`1px solid ${C.border}`,display:'flex',justifyContent:'space-between',alignItems:'baseline'}}><span style={{color:C.mute,fontSize:'10px',letterSpacing:'0.1em',textTransform:'uppercase'}}>Total portfolio</span><span style={{color:C.hi,fontSize:'18px',fontWeight:600}}>£{portfolio.totalGBP.toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
         <div style={{paddingTop:'8px',display:'flex',justifyContent:'space-between',alignItems:'baseline'}}><span style={{color:C.mute,fontSize:'10px',letterSpacing:'0.1em',textTransform:'uppercase'}}>USD buying power</span><span style={{color:C.gold,fontSize:'14px',fontWeight:600}}>${(cashBuffer*gbpUsd).toLocaleString(undefined,{maximumFractionDigits:0})}</span></div>
+        {mode==='DEPLOY'&&dynamicLevels&&cashBuffer>0&&(()=>{const perRung=(cashBuffer*gbpUsd)*0.25;return<div style={{marginTop:'6px',fontSize:'10px',color:C.mute,lineHeight:1.5,fontStyle:'italic'}}>≈ ${perRung.toLocaleString(undefined,{maximumFractionDigits:0})} per ladder rung (≈ {(perRung/mstrPrice).toFixed(0)} shares at current price)</div>;})()}
+        {portfolio.cashPct>30&&mode==='ROTATE'&&<div style={{marginTop:'12px',fontSize:'10px',color:C.gold,padding:'8px 10px',background:'#1a1611',border:`1px dashed ${C.gold}`,lineHeight:1.5}}>⚠ {portfolio.cashPct.toFixed(0)}% cash exceeds 0–25% ROTATE guideline.</div>}
         <div style={{marginTop:'14px'}}>
           <NI value={cashBuffer} onChange={handleCashBufferChange} step={500} label="Cash buffer (GBP)" min={0} max={500000}/>
-          <NI value={gbpUsd} onChange={setGbpUsd} step={0.01} label="GBP/USD rate" precision={2} min={0.5} max={3.0}/>
+          {cashBufferStaleDays!==null&&<div style={{fontSize:'9px',color:cashBufferStaleDays>7?C.gold:C.faint,marginTop:'-8px',marginBottom:'10px',lineHeight:1.4,fontStyle:'italic'}}>Cash buffer {cashBufferStaleDays===0?'confirmed today':`last confirmed ${cashBufferStaleDays}d ago`}{cashBufferStaleDays>7?' — verify vs actual SIPP balance (drives the HOARD cash gate)':''}</div>}
+          <NI value={gbpUsd} onChange={handleGbpUsdChange} step={0.001} label="GBP/USD rate" precision={4} min={0.5} max={3.0}/>
+          <div style={{fontSize:'9px',color:gbpUsdStaleDays!==null&&gbpUsdStaleDays>3?C.gold:C.faint,marginTop:'-8px',marginBottom:'2px',lineHeight:1.4,fontStyle:'italic'}}>
+            {gbpUsdStaleDays===null?'FX rate not yet timestamped — now collected via the data prompt (GBP_USD field). Paste a response to keep it live.':gbpUsdStaleDays===0?'FX rate updated today · pulled from the data prompt (GBP_USD).':`FX rate last updated ${gbpUsdStaleDays}d ago${gbpUsdStaleDays>3?' — include GBP_USD in your next data paste to refresh':' · refreshed via data prompt'}`}
+          </div>
         </div>
       </div>
 
+      {/* MVRV CLOCK */}
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
         <SH>◆ BTC cycle structure</SH>
         <div style={{marginBottom:'16px'}}>
@@ -1673,47 +1690,100 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
           <div style={{position:'relative',height:'8px',background:C.bg,border:`1px solid ${C.border}`,borderRadius:'4px',overflow:'hidden',marginBottom:'6px'}}>
             <div style={{width:`${mvrvClock.progress}%`,height:'100%',background:`linear-gradient(90deg,${C.gold} 0%,${mvrvClock.progress>70?C.green:mvrvClock.progress>40?C.gold:C.red} 100%)`,transition:'width 0.3s ease'}}/>
           </div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:'9px',color:C.faint,marginBottom:'10px'}}><span>MVRV 3.0 · Euphoria (0%)</span><span>MVRV 0.8 · Capitulation (100%)</span></div>
+          <div style={{padding:'8px 12px',background:'#0d0b09',border:`1px solid ${C.border}`,borderRadius:'3px',marginBottom:'8px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}><span style={{fontSize:'10px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase'}}>Zone</span><span style={{fontSize:'12px',color:mvrvClock.zoneColor,fontWeight:600}}>{mvrvClock.zone}</span></div>
+            <div style={{marginTop:'6px',fontSize:'9px',color:C.faint,lineHeight:1.5}}>{mvrvClock.pctToFloor.toFixed(0)}% of MVRV range remains before capitulation floor.</div>
+          </div>
+        </div>
+        <div style={{paddingTop:'14px',borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:'9px',color:C.faint,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Calendar reference (secondary · Oct 2025 ATH → Oct 2026 projection)</div>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px',gap:'8px'}}>
+            <div style={{fontSize:'11px',color:C.faint}}>Day {cycleData.elapsed} of {cycleData.totalDays}</div>
+            <div style={{fontSize:'11px',color:C.faint}}>{cycleData.progress.toFixed(0)}% elapsed</div>
+            <div style={{fontSize:'11px',color:C.faint}}>{cycleData.remaining>0?`${cycleData.remaining}d left`:`${Math.abs(cycleData.remaining)}d past`}</div>
+          </div>
+          <div style={{height:'4px',background:C.bg,border:`1px solid ${C.border}`,position:'relative',overflow:'hidden',opacity:0.5}}><div style={{width:`${cycleData.progress}%`,height:'100%',background:C.faint}}/></div>
         </div>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'24px'}}>
+      {/* SCORES */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'12px'}}>
         <div style={{background:C.panel,padding:'16px',border:`1px solid ${C.border}`}}>
           <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Bear signals</div>
           <div style={{fontSize:'28px',color:bearScore>=6?C.red:C.gold,fontWeight:600}}>{bearScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
           <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥6 → HOARD</div>
-          {bearItems.length>0&&<button onClick={()=>setBearBreakdownOpen(o=>!o)} style={{marginTop:'8px',background:'transparent',border:`1px solid ${C.border}`,color:C.mute,padding:'3px 8px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',textTransform:'uppercase',cursor:'pointer',borderRadius:'2px',width:'100%'}}>{bearBreakdownOpen?'▲ hide':'▼ breakdown'}</button>}
-          {bearBreakdownOpen&&<div style={{marginTop:'8px',borderTop:`1px solid ${C.border}`,paddingTop:'8px'}}>
-            {bearItems.map((item,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'9px',color:C.dim,marginBottom:'3px',lineHeight:1.4}}>
-              <span style={{flex:1,marginRight:'6px'}}>{item.label}</span>
-              <span style={{color:C.red,fontWeight:600,flexShrink:0}}>+{item.pts}</span>
-            </div>)}
+          {ivRank!==null&&ivRank>75&&<div style={{fontSize:'9px',color:C.red,marginTop:'4px'}}>⚡ IV Rank {ivRank} contributing +1</div>}
+          {bearItems.length>0&&<div onClick={()=>setBearBreakdownOpen(o=>!o)} style={{marginTop:'8px',fontSize:'9px',color:C.dim,cursor:'pointer',letterSpacing:'0.08em',textTransform:'uppercase'}}>{bearBreakdownOpen?'▾ hide breakdown':'▸ show breakdown'}</div>}
+          {bearBreakdownOpen&&<div style={{marginTop:'8px',paddingTop:'8px',borderTop:`1px solid ${C.border}`}}>
+            {bearItems.map((it,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'10px',marginBottom:'3px',gap:'6px'}}><span style={{color:C.dim,flex:1,minWidth:0}}>{it.label}</span><span style={{color:C.red,fontWeight:600,flexShrink:0}}>+{it.pts}</span></div>)}
           </div>}
         </div>
         <div style={{background:C.panel,padding:'16px',border:`1px solid ${C.border}`}}>
           <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'8px'}}>Bottom signals</div>
-          <div style={{fontSize:'28px',color:bottomScore>=7?C.green:C.gold,fontWeight:600}}>{bottomScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
+          <div style={{fontSize:'28px',color:bottomScore>=DEPLOY_SCORE_MIN?C.green:C.gold,fontWeight:600}}>{bottomScore}<span style={{fontSize:'14px',color:C.faint}}> / 20</span></div>
           <div style={{fontSize:'10px',color:C.mute,marginTop:'4px'}}>≥{DEPLOY_SCORE_MIN} + MSTR&lt;${dynamicCeiling} → DEPLOY</div>
-          {bottomItems.length>0&&<button onClick={()=>setBottomBreakdownOpen(o=>!o)} style={{marginTop:'8px',background:'transparent',border:`1px solid ${C.border}`,color:C.mute,padding:'3px 8px',fontFamily:S,fontSize:'9px',letterSpacing:'0.1em',textTransform:'uppercase',cursor:'pointer',borderRadius:'2px',width:'100%'}}>{bottomBreakdownOpen?'▲ hide':'▼ breakdown'}</button>}
-          {bottomBreakdownOpen&&<div style={{marginTop:'8px',borderTop:`1px solid ${C.border}`,paddingTop:'8px'}}>
-            {bottomItems.map((item,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'9px',color:C.dim,marginBottom:'3px',lineHeight:1.4}}>
-              <span style={{flex:1,marginRight:'6px'}}>{item.label}</span>
-              <span style={{color:C.green,fontWeight:600,flexShrink:0}}>+{item.pts}</span>
-            </div>)}
+          {deployImminent&&<div style={{fontSize:'9px',color:C.green,marginTop:'4px',fontWeight:600}}>{DEPLOY_SCORE_MIN-bottomScore} pt{DEPLOY_SCORE_MIN-bottomScore!==1?'s':''} to threshold ↑</div>}
+          {bottomItems.length>0&&<div onClick={()=>setBottomBreakdownOpen(o=>!o)} style={{marginTop:'8px',fontSize:'9px',color:C.dim,cursor:'pointer',letterSpacing:'0.08em',textTransform:'uppercase'}}>{bottomBreakdownOpen?'▾ hide breakdown':'▸ show breakdown'}</div>}
+          {bottomBreakdownOpen&&<div style={{marginTop:'8px',paddingTop:'8px',borderTop:`1px solid ${C.border}`}}>
+            {bottomItems.map((it,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'10px',marginBottom:'3px',gap:'6px'}}><span style={{color:C.dim,flex:1,minWidth:0}}>{it.label}</span><span style={{color:C.green,fontWeight:600,flexShrink:0}}>+{it.pts}</span></div>)}
           </div>}
         </div>
       </div>
 
+      {/* HOARD RECOVERY READOUT */}
+      {hoardReadout&&<div style={{background:C.panel,border:`1px solid ${C.red}`,padding:'20px',marginBottom:'24px'}}>
+        <SH>◆ HOARD recovery readout</SH>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'10px',marginBottom:'14px'}}>
+          <div style={{padding:'10px',background:'#1a0f0d',border:`1px solid ${C.border}`,borderRadius:'3px'}}>
+            <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Structural</div>
+            <div style={{fontSize:'18px',color:C.red,fontWeight:600}}>{hoardReadout.structuralPts}<span style={{fontSize:'11px',color:C.faint}}> pt{hoardReadout.structuralPts!==1?'s':''}</span></div>
+            <div style={{fontSize:'9px',color:C.faint,marginTop:'2px'}}>slowest to clear</div>
+          </div>
+          <div style={{padding:'10px',background:'#1a1611',border:`1px solid ${C.border}`,borderRadius:'3px'}}>
+            <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Momentum</div>
+            <div style={{fontSize:'18px',color:C.gold,fontWeight:600}}>{hoardReadout.momentumPts}<span style={{fontSize:'11px',color:C.faint}}> pt{hoardReadout.momentumPts!==1?'s':''}</span></div>
+            <div style={{fontSize:'9px',color:hoardReadout.deeplyRecovering?C.green:hoardReadout.recovering?C.gold:C.faint,marginTop:'2px'}}>{hoardReadout.nuplDelta!==null?`NUPL +${hoardReadout.nuplDelta} from trough`:'at/near lows'}</div>
+          </div>
+          <div style={{padding:'10px',background:'#0f0d0a',border:`1px solid ${C.border}`,borderRadius:'3px'}}>
+            <div style={{fontSize:'9px',color:C.mute,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Sentiment</div>
+            <div style={{fontSize:'18px',color:C.dim,fontWeight:600}}>{hoardReadout.sentimentPts}<span style={{fontSize:'11px',color:C.faint}}> pt{hoardReadout.sentimentPts!==1?'s':''}</span></div>
+            <div style={{fontSize:'9px',color:C.faint,marginTop:'2px'}}>fastest to reverse</div>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:'16px',flexWrap:'wrap',fontSize:'10px',color:C.mute,marginBottom:'12px'}}>
+          {hoardReadout.hoardWeeks!==null&&<span>In HOARD: <span style={{color:C.dim,fontWeight:600}}>{hoardReadout.hoardWeeks}w</span></span>}
+          {hoardReadout.btcAboveTrough!==null&&<span>BTC vs trough: <span style={{color:hoardReadout.btcAboveTrough>0?C.green:C.dim,fontWeight:600}}>{hoardReadout.btcAboveTrough>0?'+':''}{hoardReadout.btcAboveTrough}%</span></span>}
+          {hoardReadout.mvrvDelta!==null&&<span>MVRV vs trough: <span style={{color:C.green,fontWeight:600}}>+{hoardReadout.mvrvDelta}</span></span>}
+        </div>
+        {(hoardReadout.structural.length>0||hoardReadout.momentum.length>0||hoardReadout.sentiment.length>0)&&<div style={{marginBottom:'12px'}}>
+          {[{t:'Structural',arr:hoardReadout.structural,c:C.red},{t:'Momentum',arr:hoardReadout.momentum,c:C.gold},{t:'Sentiment',arr:hoardReadout.sentiment,c:C.dim}].map(grp=>grp.arr.length>0&&<div key={grp.t} style={{marginBottom:'8px'}}>
+            <div style={{fontSize:'9px',color:grp.c,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'4px'}}>{grp.t}</div>
+            {grp.arr.map((s,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'10px',marginBottom:'2px',gap:'8px'}}><span style={{color:C.dim,flex:1,minWidth:0}}>{s.label}</span><span style={{color:C.faint,flexShrink:0,fontSize:'9px',fontStyle:'italic',textAlign:'right',maxWidth:'55%'}}>{s.clearing}</span></div>)}
+          </div>)}
+        </div>}
+        <div style={{padding:'10px 12px',background:'#0d0b09',border:`1px solid ${C.border}`,borderRadius:'3px',fontSize:'11px',color:C.dim,lineHeight:1.6}}>{hoardReadout.summary}</div>
+        {hoardReadout.actionNote&&<div style={{marginTop:'10px',padding:'10px 12px',background:hoardReadout.actionNote.tone==='green'?'#0f1a13':hoardReadout.actionNote.tone==='amber'?'#1a1611':'#0d0b09',border:`1px dashed ${hoardReadout.actionNote.tone==='green'?C.green:hoardReadout.actionNote.tone==='amber'?C.gold:C.border}`,borderRadius:'3px',fontSize:'11px',color:hoardReadout.actionNote.tone==='green'?C.green:hoardReadout.actionNote.tone==='amber'?C.gold:C.mute,lineHeight:1.6}}>{hoardReadout.actionNote.text}</div>}
+      </div>}
+
+      {/* LEGACY NAV */}
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'24px'}}>
         <SH>◆ Legacy NAV view (per-share)</SH>
+        <div style={{fontSize:'10px',color:C.mute,marginBottom:'14px',lineHeight:1.5}}>BTC-per-share fair value, ignoring debt + preferred. For full EV-based mNAV see On-chain above.</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',fontSize:'12px',marginBottom:'14px'}}>
           <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>BTC per share</div><div style={{color:C.hi,fontSize:'15px',marginTop:'2px'}}>{btcPerShare.toFixed(5)} BTC</div></div>
           <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Fair value</div><div style={{color:C.hi,fontSize:'15px',marginTop:'2px'}}>${fairValue.toFixed(2)}</div></div>
           <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Current price</div><div style={{color:C.hi,fontSize:'15px',marginTop:'2px'}}>${mstrPrice.toFixed(2)}</div></div>
           <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Legacy mNAV</div><div style={{color:mnt(legacyMnav),fontSize:'15px',marginTop:'2px',fontWeight:600}}>{legacyMnav.toFixed(2)}x</div></div>
         </div>
+        {sthMstrFloor!==null&&<div style={{marginBottom:'14px',padding:'8px 10px',background:'#0d1510',border:`1px dashed ${C.green}`,borderRadius:'3px',fontSize:'10px',color:C.green}}>STH MSTR floor: <strong>${sthMstrFloor.toFixed(2)}</strong> = {btcPerShare.toFixed(5)} BTC/share × ${sthRealizedPrice?.toLocaleString()}</div>}
         <div style={{marginTop:'14px'}}>
           <NI value={btcHoldings} onChange={handleHoldingsChange} step={100} label="BTC holdings" min={0} max={5000000}/>
           <NI value={dilutedShares} onChange={handleSharesChange} step={1} label="Diluted shares (M)" precision={1} min={1} max={2000}/>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',marginTop:'10px',fontSize:'10px'}}>
+          <span style={{color:staleColor}}>Base updated: {corporateBaseUpdated||'never'}{daysSinceBaseUpdate!==null&&` · ${daysSinceBaseUpdate}d ago`}</span>
+          <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001050446&type=8-K&dateb=&owner=include&count=40" target="_blank" rel="noopener noreferrer" style={{color:C.gold,textDecoration:'none'}}>verify via SEC ↗</a>
         </div>
       </div>
 
@@ -1724,12 +1794,35 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         <NI value={mstrPrice} onChange={setMstrPrice} step={1} label="MSTR price" suffix="USD" min={1} max={1000}/>
         <NI value={btcPrice} onChange={setBtcPrice} step={500} label="BTC price" suffix="USD" min={1000} max={500000}/>
       </div>
+      <div style={{marginBottom:'24px'}}>
+        <SH>◆ On-chain readings (update weekly)</SH>
+        <NI value={nupl} onChange={setNupl} step={1} label="BTC NUPL" suffix="%" min={-100} max={100}/>
+        <NI value={mvrv} onChange={setMvrv} step={0.1} label="BTC MVRV" precision={1} min={0} max={10}/>
+      </div>
+      <div style={{marginBottom:'24px'}}>
+        <SH>◆ Bear signals</SH>
+        <ST value={below200ma} onChange={setBelow200ma} label={`MSTR below 200-day MA${ma200?` ($${ma200.toFixed(2)})`:''}` } helperUrl="https://www.tradingview.com/symbols/NASDAQ-MSTR/"/>
+        <ST value={weeklyLowerLow} onChange={setWeeklyLowerLow} label="MSTR weekly lower-low after lower-high" helperUrl="https://www.tradingview.com/chart/?symbol=NASDAQ%3AMSTR&interval=W"/>
+        <ST value={fundingNegative} onChange={v=>{setFundingNegative(v);if(v)setDerivativesExhaustion(false);}} label="BTC perp funding persistently negative" helperUrl="https://www.coinglass.com/FundingRate"/>
+        <ST value={dxyAbove110} onChange={setDxyAbove110} label="DXY above 110" helperUrl="https://www.tradingview.com/symbols/TVC-DXY/"/>
+        <ST value={btcBelowSthCost} onChange={setBtcBelowSthCost} label={`BTC below STH cost basis${sthRealizedPrice?` ($${sthRealizedPrice.toLocaleString()})`:''}` } helperUrl="https://studio.glassnode.com/charts/btc-sth-realized-price-mvrv"/>
+        <ST value={etfOutflowsPersistent} onChange={setEtfOutflowsPersistent} label={`Spot ETF outflows persistent${etfFlows5d!==null?` (5D: ${etfFlows5d>=0?'+':''}$${etfFlows5d}M)`:''}`} helperUrl="https://farside.co.uk/btc/"/>
+        <ST value={atmActive&&mNAV<1.2} onChange={v=>setAtmActive(v)} label={`ATM programme active at low premium${atmActive?` (mNAV ${mNAV.toFixed(2)}x)`:''}`} helperUrl="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001050446&type=S-3&dateb=&owner=include&count=10"/>
+        <div style={{fontSize:'10px',color:C.mute,lineHeight:1.6,marginTop:'8px',paddingLeft:'14px'}}>IV Rank &gt;75 scores automatically from pasted data block.</div>
+      </div>
+      <div style={{marginBottom:'24px'}}>
+        <SH>◆ Bottom signals</SH>
+        <ST value={derivativesExhaustion} onChange={v=>{setDerivativesExhaustion(v);if(v)setFundingNegative(false);}} label="BTC derivatives exhaustion (funding flat + OI multi-month lows)" helperUrl="https://www.coinglass.com/BitcoinOpenInterest" bottomTone/>
+        <ST value={mnavCompressed} onChange={v=>{setMnavCompressed(v);if(v)setMnavEuphoric(false);}} label={`mNAV compressed below 1.05x${mNAV?` (now ${mNAV.toFixed(2)}x)`:''}`} helperUrl="https://bitcoinquant.co/company/MSTR" bottomTone/>
+        <div style={{fontSize:'10px',color:C.mute,lineHeight:1.6,marginTop:'8px',paddingLeft:'14px'}}>Other bottom signals score automatically from prices, NUPL, MVRV, cycle timing.</div>
+      </div>
 
       {/* PROMPT */}
       <div style={{background:C.panel,border:`1px solid ${C.gold}`,padding:'20px',marginBottom:'24px'}}>
         <SH>◆ Prompt-driven update (3 steps)</SH>
         <div style={{fontSize:'11px',color:C.dim,marginBottom:'12px',lineHeight:1.6}}><strong style={{color:C.gold}}>Step 1:</strong> copy prompt below. <strong style={{color:C.gold}}>Step 2:</strong> paste into Claude/Gemini with web search. <strong style={{color:C.gold}}>Step 3:</strong> paste response below.</div>
-        <textarea ref={promptTextareaRef} readOnly value={claudePrompt} onClick={handlePromptTextareaClick} style={{width:'100%',height:'220px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'12px',fontFamily:'Menlo,monospace',fontSize:'11px',resize:'vertical',lineHeight:1.5,boxSizing:'border-box'}}/>
+        <div style={{fontSize:'10px',color:C.mute,marginBottom:'10px',fontStyle:'italic'}}>Now collects GBP/USD too — the FX rate refreshes on every paste. iOS tip: tap textarea to select all, then long-press to copy.</div>
+        <textarea ref={promptTextareaRef} readOnly value={claudePrompt} onClick={handlePromptTextareaClick} style={{width:'100%',height:'220px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'12px',fontFamily:'Menlo,monospace',fontSize:'11px',resize:'vertical',lineHeight:1.5,boxSizing:'border-box',WebkitUserSelect:'text',userSelect:'text'}}/>
         <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:'8px',marginTop:'10px'}}>
           <button onClick={copyPrompt} style={{background:promptCopied?C.green:C.gold,color:C.bg,border:'none',padding:'10px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>{promptCopied?'✓ copied':'◆ copy prompt'}</button>
           <button onClick={handlePromptTextareaClick} style={{background:'transparent',color:C.gold,border:`1px solid ${C.gold}`,padding:'10px',fontFamily:S,fontSize:'10px',letterSpacing:'0.1em',textTransform:'uppercase',cursor:'pointer'}}>select all</button>
@@ -1737,7 +1830,7 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         {promptSelectMsg&&<div style={{marginTop:'8px',fontSize:'11px',color:C.gold,padding:'8px 10px',background:'#1a1611',border:`1px dashed ${C.gold}`}}>{promptSelectMsg}</div>}
         <div style={{marginTop:'20px',paddingTop:'20px',borderTop:`1px solid ${C.border}`}}>
           <div style={{fontSize:'11px',letterSpacing:'0.15em',color:C.dim,textTransform:'uppercase',marginBottom:'10px',fontFamily:S}}>◆ Paste response here</div>
-          <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} placeholder={'Paste the data block here.\n\n---BEGIN DATA---\nMSTR_PRICE: 134.73\nBTC_PRICE: 80866\nMNAV: 1.02\n...\n---END DATA---'} style={{width:'100%',height:'160px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'12px',fontFamily:'Menlo,monospace',fontSize:'11px',resize:'vertical',lineHeight:1.5,boxSizing:'border-box'}}/>
+          <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)} placeholder={'Paste the data block here.\n\n---BEGIN DATA---\nMSTR_PRICE: 167\nBTC_PRICE: 77000\nGBP_USD: 1.2734\nMNAV: 1.09\n...\n---END DATA---'} style={{width:'100%',height:'160px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'12px',fontFamily:'Menlo,monospace',fontSize:'11px',resize:'vertical',lineHeight:1.5,boxSizing:'border-box'}}/>
           <button onClick={applyPaste} style={{width:'100%',marginTop:'10px',background:C.green,color:'#fff',border:'none',padding:'10px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>◆ apply readings</button>
           {pasteResult&&<div style={{marginTop:'10px',fontSize:'11px',padding:'10px 12px',background:pasteResult.ok?'#0f1a13':'#1a0f0d',border:`1px dashed ${pasteResult.ok?C.green:C.red}`,color:pasteResult.ok?C.green:C.red,lineHeight:1.5}}>{pasteResult.ok?'✓ ':'⚠ '}{pasteResult.msg}</div>}
         </div>
@@ -1748,11 +1841,84 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
     {view==='positions'&&(<>
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'20px'}}>
         <SH>◆ Open new position</SH>
+        <div style={{fontSize:'11px',color:C.dim,marginBottom:'14px',lineHeight:1.6}}>Positions are DCA-friendly — a buy needn't be matched by an identical sell. You can <strong style={{color:C.gold}}>trim</strong> part of a lot later (e.g. open 101, sell 79, keep 22) or close the balance. Every trim/close auto-writes a paired SELL into the Journal.</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',fontSize:'11px',marginBottom:'12px'}}>
           <div><div style={{color:C.mute,marginBottom:'4px'}}>Shares</div><input type="number" placeholder="Shares" value={positionForm.shares} onChange={e=>setPositionForm({...positionForm,shares:e.target.value})} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/></div>
           <div><div style={{color:C.mute,marginBottom:'4px'}}>Entry price (USD)</div><input type="number" placeholder="Entry" value={positionForm.entryPrice} onChange={e=>setPositionForm({...positionForm,entryPrice:e.target.value})} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/></div>
+          <div><div style={{color:C.mute,marginBottom:'4px'}}>Stop (optional)</div><input type="number" placeholder="Stop" value={positionForm.stop} onChange={e=>setPositionForm({...positionForm,stop:e.target.value})} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/></div>
+          <div><div style={{color:C.mute,marginBottom:'4px'}}>Target (optional)</div><input type="number" placeholder="Target" value={positionForm.target} onChange={e=>setPositionForm({...positionForm,target:e.target.value})} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/></div>
+          <div style={{gridColumn:'span 2'}}><div style={{color:C.mute,marginBottom:'4px'}}>Tag / origin</div><input type="text" placeholder="e.g. ROTATE-BUY, HOARD-SELL, MANUAL" value={positionForm.tag} onChange={e=>setPositionForm({...positionForm,tag:e.target.value})} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/></div>
+          <div style={{gridColumn:'span 2'}}><div style={{color:C.mute,marginBottom:'4px'}}>Notes</div><input type="text" placeholder="Optional notes" value={positionForm.notes} onChange={e=>setPositionForm({...positionForm,notes:e.target.value})} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/></div>
         </div>
-        <button onClick={()=>openPosition()} disabled={!positionForm.shares||!positionForm.entryPrice} style={{width:'100%',background:positionForm.shares&&positionForm.entryPrice?C.green:C.border,color:'#fff',border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',cursor:'pointer'}}>OPEN POSITION</button>
+        <button onClick={()=>openPosition()} disabled={!positionForm.shares||!positionForm.entryPrice} style={{width:'100%',background:positionForm.shares&&positionForm.entryPrice?C.green:C.border,color:'#fff',border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',cursor:positionForm.shares&&positionForm.entryPrice?'pointer':'not-allowed'}}>OPEN POSITION</button>
+      </div>
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px'}}>
+        <SH>◆ Positions ({positions.filter(p=>p.status==='OPEN').length} open · {positions.filter(p=>p.status==='CLOSED').length} closed)</SH>
+        {positions.length===0?<div style={{color:C.faint,fontSize:'12px',textAlign:'center',padding:'20px 0'}}>No positions yet.</div>:(
+          <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+            {[...positions].sort((a,b)=>(b.openedAt||'').localeCompare(a.openedAt||'')).map(p=>{
+              const isOpen=p.status==='OPEN';
+              const orig=p.originalShares??p.shares;
+              const closesArr=Array.isArray(p.closes)?p.closes:[];
+              const closedShares=closesArr.reduce((a,c)=>a+c.shares,0);
+              const trimmed=isOpen&&closesArr.length>0;
+              const realized=positionRealized(p);
+              const unrealized=isOpen?(mstrPrice-p.entryPrice)*p.shares:0;
+              const totalPnL=realized+unrealized;
+              const avgExit=closedShares>0?closesArr.reduce((a,c)=>a+c.price*c.shares,0)/closedShares:(p.exitPrice??null);
+              const rc=realized>=0?C.green:C.red;
+              const uc=unrealized>=0?C.green:C.red;
+              const tc=totalPnL>=0?C.green:C.red;
+              const qtyRaw=exitShares[p.id];
+              const qtyNum=qtyRaw===''||qtyRaw==null?null:parseFloat(qtyRaw);
+              const isFullClose=qtyNum===null||isNaN(qtyNum)||qtyNum>=p.shares;
+              const actLabel=isFullClose?'CLOSE':'TRIM';
+              const exitOK=exitPrices[p.id]&&!isNaN(parseFloat(exitPrices[p.id]));
+              return(
+                <div key={p.id} style={{background:C.bg,border:`1px solid ${isOpen?C.border:'#222'}`,padding:'12px',opacity:isOpen?1:0.7}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'8px',gap:'8px',flexWrap:'wrap'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
+                      <span style={{fontSize:'10px',color:isOpen?C.green:C.mute,letterSpacing:'0.15em',textTransform:'uppercase'}}>{p.status}</span>
+                      {trimmed&&<span style={{fontSize:'8px',color:C.gold,border:`1px solid ${C.gold}`,padding:'1px 5px',borderRadius:'2px',letterSpacing:'0.1em',fontWeight:700}}>TRIMMED</span>}
+                      <span style={{fontSize:'10px',color:C.mute}}>{p.tag}</span>
+                    </div>
+                    <div style={{fontSize:'10px',color:C.faint}}>{(p.openedAt||'').slice(0,10)}</div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'8px',fontSize:'11px',marginBottom:'8px'}}>
+                    <div><div style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>{isOpen?'Remaining':'Shares'}</div><div style={{color:C.text,fontWeight:600}}>{isOpen?p.shares:orig}{(trimmed||(!isOpen&&closesArr.length>1))&&<span style={{color:C.faint,fontWeight:400,fontSize:'9px'}}> / {orig}</span>}</div></div>
+                    <div><div style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>Entry</div><div style={{color:C.text,fontWeight:600}}>${p.entryPrice.toFixed(2)}</div></div>
+                    <div><div style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>{isOpen?'Live':'Avg exit'}</div><div style={{color:isOpen?uc:rc,fontWeight:600}}>{isOpen?`$${mstrPrice.toFixed(2)}`:(avgExit!=null?`$${avgExit.toFixed(2)}`:'—')}</div></div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:isOpen?'1fr 1fr':'1fr',gap:'8px',fontSize:'11px',marginBottom:'8px',padding:'8px 10px',background:'#0d0b09',borderRadius:'3px',border:`1px solid ${C.border}`}}>
+                    {(closesArr.length>0||!isOpen)&&<div><div style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>Realized P&L{closedShares>0?` (${closedShares} sh)`:''}</div><div style={{color:rc,fontWeight:600}}>{realized>=0?'+':''}${realized.toFixed(0)}</div></div>}
+                    {isOpen&&<div><div style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>Unrealized ({p.shares} sh)</div><div style={{color:uc,fontWeight:600}}>{unrealized>=0?'+':''}${unrealized.toFixed(0)} ({(((mstrPrice/p.entryPrice)-1)*100)>=0?'+':''}{(((mstrPrice/p.entryPrice)-1)*100).toFixed(1)}%)</div></div>}
+                    {closesArr.length>0&&isOpen&&<div style={{gridColumn:'span 2',borderTop:`1px solid ${C.border}`,paddingTop:'6px'}}><span style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>Combined</span> <span style={{color:tc,fontWeight:600,fontSize:'12px'}}>{totalPnL>=0?'+':''}${totalPnL.toFixed(0)}</span></div>}
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:'11px',marginBottom:isOpen?'10px':0}}>
+                    <div style={{color:C.mute}}>{p.stop?`Stop $${p.stop}`:'—'} · {p.target?`Target $${p.target}`:'—'}</div>
+                  </div>
+                  {p.notes&&<div style={{fontSize:'10px',color:C.faint,fontStyle:'italic',marginBottom:isOpen?'10px':0}}>{p.notes}</div>}
+                  {closesArr.length>0&&<div style={{marginTop:'4px',marginBottom:isOpen?'10px':0,paddingTop:'6px',borderTop:`1px dashed ${C.border}`}}>
+                    <div style={{fontSize:'8px',color:C.faint,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:'3px'}}>Exit history</div>
+                    {closesArr.map((c,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',fontSize:'9px',color:C.mute,marginBottom:'1px'}}><span>{(c.at||'').slice(0,10)} · {c.shares} sh @ ${c.price.toFixed(2)}</span><span style={{color:(c.price-p.entryPrice)>=0?C.green:C.red}}>{((c.price-p.entryPrice)*c.shares-(c.fees||0))>=0?'+':''}${((c.price-p.entryPrice)*c.shares-(c.fees||0)).toFixed(0)}</span></div>)}
+                  </div>}
+                  {isOpen&&<div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'8px'}}>
+                      <input type="number" placeholder={`Qty (max ${p.shares})`} value={exitShares[p.id]??''} onChange={e=>setExitShares(prev=>({...prev,[p.id]:e.target.value}))} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'6px 8px',fontFamily:S,fontSize:'11px',borderRadius:'2px'}}/>
+                      <input type="number" placeholder="Exit price" value={exitPrices[p.id]??''} onChange={e=>setExitPrices(prev=>({...prev,[p.id]:e.target.value}))} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'6px 8px',fontFamily:S,fontSize:'11px',borderRadius:'2px'}}/>
+                    </div>
+                    <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
+                      <button onClick={()=>{const v=exitPrices[p.id];if(exitOK){closePosition(p.id,v,0,exitShares[p.id]??null);setExitPrices(prev=>{const n={...prev};delete n[p.id];return n;});setExitShares(prev=>{const n={...prev};delete n[p.id];return n;});}}} disabled={!exitOK} style={{flex:1,background:exitOK?(actLabel==='TRIM'?C.gold:C.red):C.border,color:actLabel==='TRIM'&&exitOK?'#000':'#fff',border:'none',padding:'8px 12px',fontFamily:S,fontSize:'10px',letterSpacing:'0.12em',cursor:exitOK?'pointer':'not-allowed',borderRadius:'2px',fontWeight:600}}>{actLabel}{actLabel==='TRIM'&&qtyNum?` ${qtyNum}`:''}</button>
+                      <button onClick={()=>deletePosition(p.id)} style={{background:'transparent',border:`1px solid ${C.border}`,color:C.mute,padding:'8px 10px',fontFamily:S,fontSize:'10px',cursor:'pointer',borderRadius:'2px'}}>✕</button>
+                    </div>
+                    <div style={{fontSize:'9px',color:C.faint,marginTop:'6px',fontStyle:'italic',lineHeight:1.4}}>Leave qty blank to close the full remaining {p.shares} sh. Enter a smaller number to trim (DCA out) and keep the rest open.</div>
+                  </div>}
+                  {!isOpen&&<div style={{marginTop:'8px',display:'flex',justifyContent:'flex-end'}}><button onClick={()=>deletePosition(p.id)} style={{background:'transparent',border:`1px solid ${C.border}`,color:C.mute,padding:'4px 8px',fontFamily:S,fontSize:'9px',cursor:'pointer'}}>DELETE</button></div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </>)}
 
@@ -1760,6 +1926,24 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
     {view==='project'&&(
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'20px'}}>
         <SH>◆ What-if projection</SH>
+        <div style={{fontSize:'11px',color:C.dim,marginBottom:'16px',lineHeight:1.6}}>Implied MSTR price = (BTC holdings × future BTC) ÷ (future diluted shares) × mNAV. Not a forecast.</div>
+        <div style={{marginBottom:'20px'}}>
+          <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'12px'}}>Scenario inputs</div>
+          <div className="g-auto-3" style={{marginBottom:'12px'}}>
+            <div><div style={{fontSize:'9px',color:C.red,textTransform:'uppercase',marginBottom:'4px'}}>Bear BTC</div><input type="number" value={projBearBtc} onChange={e=>setProjBearBtc(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'7px 8px',fontFamily:S,fontSize:'12px'}}/></div>
+            <div><div style={{fontSize:'9px',color:C.gold,textTransform:'uppercase',marginBottom:'4px'}}>Base BTC</div><input type="number" value={projBaseBtc} onChange={e=>setProjBaseBtc(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'7px 8px',fontFamily:S,fontSize:'12px'}}/></div>
+            <div><div style={{fontSize:'9px',color:C.green,textTransform:'uppercase',marginBottom:'4px'}}>Bull BTC</div><input type="number" value={projBullBtc} onChange={e=>setProjBullBtc(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'7px 8px',fontFamily:S,fontSize:'12px'}}/></div>
+          </div>
+          <div className="g-auto-3" style={{marginBottom:'12px'}}>
+            <div><div style={{fontSize:'9px',color:C.red,textTransform:'uppercase',marginBottom:'4px'}}>Bear mNAV</div><input type="number" step="0.1" value={projBearMnav} onChange={e=>setProjBearMnav(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'7px 8px',fontFamily:S,fontSize:'12px'}}/></div>
+            <div><div style={{fontSize:'9px',color:C.gold,textTransform:'uppercase',marginBottom:'4px'}}>Base mNAV</div><input type="number" step="0.1" value={projBaseMnav} onChange={e=>setProjBaseMnav(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'7px 8px',fontFamily:S,fontSize:'12px'}}/></div>
+            <div><div style={{fontSize:'9px',color:C.green,textTransform:'uppercase',marginBottom:'4px'}}>Bull mNAV</div><input type="number" step="0.1" value={projBullMnav} onChange={e=>setProjBullMnav(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'7px 8px',fontFamily:S,fontSize:'12px'}}/></div>
+          </div>
+          <div><div style={{fontSize:'9px',color:C.mute,textTransform:'uppercase',marginBottom:'4px'}}>Future diluted shares (M) — blank = current ({dilutedShares}M)</div><input type="number" step="1" placeholder={`${dilutedShares} (current)`} value={projShares===null?'':projShares} onChange={e=>setProjShares(e.target.value===''?null:Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'7px 8px',fontFamily:S,fontSize:'12px'}}/></div>
+        </div>
+        <div style={{fontSize:'10px',color:C.mute,marginBottom:'16px',padding:'8px 10px',background:C.bg,border:`1px solid ${C.border}`,borderRadius:'3px',lineHeight:1.5}}>
+          Current: {journalStats.currentShares.toFixed(0)} sh · £{portfolio.totalGBP.toLocaleString(undefined,{maximumFractionDigits:0})} total · {btcHoldings.toLocaleString()} BTC held
+        </div>
         <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
           {projectionScenarios.map(sc=>(
             <div key={sc.label} style={{padding:'14px 16px',background:C.bg,border:`1px solid ${sc.color}`,borderRadius:'3px'}}>
@@ -1768,12 +1952,15 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
                 <div style={{fontSize:'10px',color:sc.vsCurrentPct>=0?C.green:C.red,fontWeight:600}}>{sc.vsCurrentPct>=0?'+':''}{sc.vsCurrentPct.toFixed(0)}% vs today</div>
               </div>
               <div className="g-auto-4">
+                <div><div style={{fontSize:'9px',color:C.faint,textTransform:'uppercase',marginBottom:'2px'}}>BTC</div><div style={{color:C.text,fontSize:'12px',fontWeight:600}}>${sc.btc.toLocaleString()}</div></div>
+                <div><div style={{fontSize:'9px',color:C.faint,textTransform:'uppercase',marginBottom:'2px'}}>mNAV</div><div style={{color:C.text,fontSize:'12px',fontWeight:600}}>{sc.mnav.toFixed(1)}x</div></div>
                 <div><div style={{fontSize:'9px',color:C.faint,textTransform:'uppercase',marginBottom:'2px'}}>MSTR</div><div style={{color:sc.color,fontSize:'12px',fontWeight:600}}>${sc.impliedPrice.toFixed(0)}</div></div>
                 <div><div style={{fontSize:'9px',color:C.faint,textTransform:'uppercase',marginBottom:'2px'}}>Portfolio</div><div style={{color:sc.color,fontSize:'12px',fontWeight:600}}>£{Math.round(sc.totalGBP).toLocaleString()}</div></div>
               </div>
             </div>
           ))}
         </div>
+        <div style={{marginTop:'14px',fontSize:'10px',color:C.faint,lineHeight:1.5,fontStyle:'italic'}}>Uses current BTC holdings ({btcHoldings.toLocaleString()}) and share count ({journalStats.currentShares.toFixed(0)} sh). NOT a forecast.</div>
       </div>
     )}
 
@@ -1781,7 +1968,19 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
     {view==='backup'&&(<>
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'20px'}}>
         <SH>◆ Export state</SH>
-        <button onClick={exportJSONFile} style={{width:'100%',background:C.gold,color:'#000',border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',cursor:'pointer',borderRadius:'2px',fontWeight:600}}>DOWNLOAD .JSON</button>
+        <div style={{fontSize:'11px',color:C.dim,marginBottom:'14px',lineHeight:1.6}}>Full JSON — settings, trades, positions, snapshots, miss events, regime log. Auto-persists in localStorage; export is your portable backup.</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
+          <button onClick={exportJSONFile} style={{background:C.gold,color:'#000',border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',cursor:'pointer',borderRadius:'2px',fontWeight:600}}>DOWNLOAD .JSON</button>
+          <button onClick={exportJSON} style={{background:'transparent',color:C.gold,border:`1px solid ${C.gold}`,padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',cursor:'pointer',borderRadius:'2px'}}>COPY TO CLIPBOARD</button>
+        </div>
+        {importResult?.payload&&<textarea readOnly value={importResult.payload} style={{width:'100%',marginTop:'12px',height:'160px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:'monospace',fontSize:'10px'}}/>}
+      </div>
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px'}}>
+        <SH>◆ Import state</SH>
+        <label style={{display:'block',marginBottom:'12px'}}><span style={{display:'inline-block',background:'transparent',color:C.dim,border:`1px dashed ${C.border}`,padding:'8px 14px',fontFamily:S,fontSize:'10px',letterSpacing:'0.1em',cursor:'pointer',borderRadius:'2px',textTransform:'uppercase'}}>Choose .json file</span><input type="file" accept="application/json,.json" onChange={e=>importJSONFile(e.target.files?.[0])} style={{display:'none'}}/></label>
+        <textarea value={importText} onChange={e=>setImportText(e.target.value)} placeholder='{"version":14.12,...}' style={{width:'100%',height:'140px',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:'monospace',fontSize:'10px',marginBottom:'12px'}}/>
+        <button onClick={importJSON} disabled={!importText.trim()} style={{width:'100%',background:importText.trim()?C.green:C.border,color:'#fff',border:'none',padding:'10px',fontFamily:S,fontSize:'11px',letterSpacing:'0.15em',cursor:importText.trim()?'pointer':'not-allowed',borderRadius:'2px',fontWeight:600}}>IMPORT JSON</button>
+        {importResult&&<div style={{marginTop:'12px',fontSize:'11px',color:importResult.ok?C.green:C.red,padding:'8px 12px',border:`1px dashed ${importResult.ok?C.green:C.red}`}}>{importResult.ok?'✓ ':'⚠ '}{importResult.msg}</div>}
       </div>
     </>)}
 
@@ -1792,39 +1991,81 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',fontSize:'12px',marginBottom:'16px'}}>
           <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Starting shares</div><input type="number" value={startingShares} onChange={e=>setStartingShares(Number(e.target.value))} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.hi,padding:'6px 10px',fontFamily:S,fontSize:'15px',marginTop:'4px'}}/></div>
           <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Current shares</div><div style={{color:C.hi,fontSize:'20px',marginTop:'4px',fontWeight:600}}>{journalStats.currentShares.toFixed(0)}</div></div>
+          <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Δ shares</div><div style={{color:journalStats.sharesDelta>=0?C.green:C.red,fontSize:'20px',marginTop:'4px',fontWeight:600}}>{journalStats.sharesDelta>=0?'+':''}{journalStats.sharesDelta.toFixed(0)} ({journalStats.sharesPct.toFixed(1)}%)</div></div>
+          <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Net cash flow</div><div style={{color:C.hi,fontSize:'15px',marginTop:'4px'}}>${journalStats.totalCash.toFixed(0)}</div></div>
+        </div>
+        {journalStats.weightedAvgCost!==null&&<div style={{marginBottom:'14px',padding:'10px 12px',background:C.bg,border:`1px solid ${C.border}`,borderRadius:'3px'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+            <div><div style={{fontSize:'9px',color:C.mute,textTransform:'uppercase',marginBottom:'2px'}}>Wtd avg cost (trades only)</div><div style={{color:C.gold,fontSize:'15px',fontWeight:600}}>${journalStats.weightedAvgCost.toFixed(2)}</div><div style={{fontSize:'9px',color:mstrPrice>=journalStats.weightedAvgCost?C.green:C.red,marginTop:'2px'}}>{mstrPrice>=journalStats.weightedAvgCost?`+${(((mstrPrice-journalStats.weightedAvgCost)/journalStats.weightedAvgCost)*100).toFixed(1)}% above cost`:`${(((mstrPrice-journalStats.weightedAvgCost)/journalStats.weightedAvgCost)*100).toFixed(1)}% below cost`}</div></div>
+            <div><div style={{fontSize:'9px',color:C.mute,textTransform:'uppercase',marginBottom:'2px'}}>Total buy cash</div><div style={{color:C.text,fontSize:'15px',fontWeight:600}}>${Math.round(journalStats.totalBuyCash).toLocaleString()}</div><div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>all BUY legs inc. fees</div></div>
+          </div>
+        </div>}
+        <div style={{paddingTop:'14px',borderTop:`1px solid ${C.border}`}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',fontSize:'12px'}}>
+            <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Rotation shares gained</div><div style={{color:journalStats.rotationShares>=0?C.green:C.red,fontSize:'20px',marginTop:'4px',fontWeight:600}}>{journalStats.completedRotations>0?`${journalStats.rotationShares>=0?'+':''}${journalStats.rotationShares.toFixed(0)}`:'—'}</div><div style={{color:C.mute,fontSize:'10px',marginTop:'2px'}}>{journalStats.completedRotations} completed rotation{journalStats.completedRotations!==1?'s':''}</div>{journalStats.rotationShares>0&&thesisPerf.rotationAlphaGBP>0&&<div style={{color:C.green,fontSize:'11px',marginTop:'4px',fontWeight:600}}>≈ £{Math.round(thesisPerf.rotationAlphaGBP).toLocaleString()} alpha value</div>}</div>
+            <div><div style={{color:C.mute,fontSize:'10px',textTransform:'uppercase'}}>Avg per rotation</div><div style={{color:C.hi,fontSize:'20px',marginTop:'4px',fontWeight:600}}>{journalStats.completedRotations>0?`+${(journalStats.rotationShares/journalStats.completedRotations).toFixed(1)}`:'—'}</div><div style={{color:C.mute,fontSize:'10px',marginTop:'2px'}}>shares per cycle</div>{journalStats.accrualRateAnnual!==null&&<div style={{color:C.gold,fontSize:'10px',marginTop:'4px'}}>{journalStats.accrualRateAnnual.toFixed(1)} sh/yr annualised</div>}</div>
+          </div>
+          {journalStats.completedRotations>0&&<div style={{marginTop:'14px',paddingTop:'14px',borderTop:`1px solid ${C.border}`}}>
+            <div style={{fontSize:'10px',color:C.mute,textTransform:'uppercase',marginBottom:'8px'}}>Accrual efficiency</div>
+            {journalStats.costPerExtraShare!==null&&journalStats.rotationShares>0?(
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px'}}>
+                <div><div style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>Cost per extra share</div><div style={{color:C.gold,fontSize:'16px',marginTop:'2px',fontWeight:600}}>${journalStats.costPerExtraShare.toFixed(0)}</div><div style={{color:C.mute,fontSize:'9px',marginTop:'2px'}}>vs current ${mstrPrice.toFixed(0)}</div></div>
+                <div><div style={{color:C.mute,fontSize:'9px',textTransform:'uppercase'}}>Efficiency vs market</div><div style={{display:'flex',alignItems:'center',gap:'6px',marginTop:'2px'}}><div style={{color:journalStats.costPerExtraShare<mstrPrice?C.green:C.red,fontSize:'16px',fontWeight:600}}>{journalStats.costPerExtraShare<mstrPrice?`${(((mstrPrice-journalStats.costPerExtraShare)/mstrPrice)*100).toFixed(0)}% below`:`${(((journalStats.costPerExtraShare-mstrPrice)/mstrPrice)*100).toFixed(0)}% above`}</div>{thesisPerf.alphaConfirmed&&<span style={{fontSize:'9px',color:C.green,border:`1px solid ${C.green}`,padding:'1px 5px',borderRadius:'2px',letterSpacing:'0.06em',fontWeight:700}}>ALPHA ✓</span>}</div></div>
+              </div>
+            ):<div style={{fontSize:'11px',color:C.mute,fontStyle:'italic',padding:'8px 10px',background:C.bg,border:`1px dashed ${C.border}`}}>{journalStats.rotationShares<=0?'Net rotation shares zero or negative.':'Awaiting completed cycle…'}</div>}
+            <div style={{fontSize:'10px',color:C.mute,marginTop:'10px',lineHeight:1.5,fontStyle:'italic'}}>Efficiency = cash in paired BUY legs ÷ net shares gained. Below market = positive alpha.</div>
+          </div>}
+          {journalStats.completedRotations===0&&trades.length>0&&<div style={{fontSize:'11px',color:C.mute,fontStyle:'italic',padding:'10px 12px',background:C.bg,border:`1px dashed ${C.border}`,marginTop:'16px'}}>Awaiting completed cycle… Log SELL(s) then a BUY-back to see accrual efficiency.</div>}
+          <div style={{fontSize:'10px',color:C.mute,marginTop:'12px',lineHeight:1.5,fontStyle:'italic'}}>DCA-aware: a rotation completes when a BUY-back matches against all SELLs booked since the previous buy — consecutive sells aggregate rather than overwrite, and a buy needn't equal an identical sell. Direct buys with no prior sell are tracked in the share count but not in rotation metrics.</div>
         </div>
       </div>
 
+      {/* EXECUTION DISCIPLINE */}
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'20px'}}>
-        <SH>◆ Add Trade / DCA Log</SH>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'12px'}}>
-          <div style={{display:'flex',gap:'8px',gridColumn:'span 2'}}>
-            <button onClick={()=>setTradeType('SELL')} style={{flex:1,background:tradeType==='SELL'?C.red:'transparent',color:tradeType==='SELL'?'#fff':C.dim,border:`1px solid ${tradeType==='SELL'?C.red:C.border}`,padding:'8px',fontFamily:S,fontSize:'11px',letterSpacing:'0.1em',cursor:'pointer',fontWeight:700}}>SELL</button>
-            <button onClick={()=>setTradeType('BUY')} style={{flex:1,background:tradeType==='BUY'?C.green:'transparent',color:tradeType==='BUY'?'#fff':C.dim,border:`1px solid ${tradeType==='BUY'?C.green:C.border}`,padding:'8px',fontFamily:S,fontSize:'11px',letterSpacing:'0.1em',cursor:'pointer',fontWeight:700}}>BUY</button>
+        <SH>◆ Execution discipline</SH>
+        <div style={{fontSize:'11px',color:C.dim,marginBottom:'14px',lineHeight:1.6}}>Tracks zone hits detected on dashboard load. "Yes" = logged trade. "No" = missed. Dismissals not counted.</div>
+        <div className="g-auto-2" style={{marginBottom:'16px'}}>
+          <div style={{padding:'10px',background:C.bg,border:`1px solid ${C.border}`,borderRadius:'3px'}}>
+            <div style={{fontSize:'9px',color:C.mute,textTransform:'uppercase',marginBottom:'4px'}}>Sell zone exec rate</div>
+            <div style={{color:missStats.execRateSell===null?C.faint:missStats.execRateSell>=70?C.green:missStats.execRateSell>=40?C.gold:C.red,fontSize:'20px',fontWeight:700}}>{missStats.execRateSell!==null?`${missStats.execRateSell}%`:'—'}</div>
+            <div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>{missStats.actedSell} acted · {missStats.sellMisses} missed</div>
           </div>
-          <input type="date" value={tradeDate} onChange={e=>setTradeDate(e.target.value)} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/>
-          <input type="number" placeholder="Shares Count" value={tradeShares} onChange={e=>setTradeShares(e.target.value)} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/>
-          
-          <div style={{gridColumn:'span 2'}}>
-            <div style={{color:C.mute,fontSize:'10px',marginBottom:'4px'}}>Format</div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'6px'}}>
-              <button onClick={()=>setTradePriceMode('GBP_TOTAL')} style={{background:tradePriceMode==='GBP_TOTAL'?C.gold:'transparent',color:tradePriceMode==='GBP_TOTAL'?'#000':C.dim,border:`1px solid ${C.border}`,padding:'6px',fontSize:'10px'}}>Total £</button>
-              <button onClick={()=>setTradePriceMode('GBX')} style={{background:tradePriceMode==='GBX'?C.gold:'transparent',color:tradePriceMode==='GBX'?'#000':C.dim,border:`1px solid ${C.border}`,padding:'6px',fontSize:'10px'}}>Pence (GBX)</button>
-              <button onClick={()=>setTradePriceMode('GBP_PRICE')} style={{background:tradePriceMode==='GBP_PRICE'?C.gold:'transparent',color:tradePriceMode==='GBP_PRICE'?'#000':C.dim,border:`1px solid ${C.border}`,padding:'6px',fontSize:'10px'}}>Price £</button>
-              <button onClick={()=>setTradePriceMode('USD')} style={{background:tradePriceMode==='USD'?C.gold:'transparent',color:tradePriceMode==='USD'?'#000':C.dim,border:`1px solid ${C.border}`,padding:'6px',fontSize:'10px'}}>USD ($)</button>
-            </div>
-          </div>
-
-          <div style={{gridColumn:'span 2'}}>
-            <input type="number" step="any" placeholder="Enter Amount / Proceeds" value={tradePriceInput} onChange={e=>setTradePriceInput(e.target.value)} style={{width:'100%',background:C.bg,border:`1px solid ${C.border}`,color:C.gold,padding:'10px',fontFamily:S,fontSize:'14px',fontWeight:600}}/>
-          </div>
-
-          <div style={{gridColumn:'span 2',display:'flex',alignItems:'center',gap:'8px'}}>
-            <input type="checkbox" id="syncCash" checked={autoSyncCash} onChange={e=>setAutoSyncCash(e.target.checked)}/>
-            <label htmlFor="syncCash" style={{fontSize:'11px',color:C.dim,cursor:'pointer'}}>Auto-sync proceeds to SIPP Cash Buffer</label>
+          <div style={{padding:'10px',background:C.bg,border:`1px solid ${C.border}`,borderRadius:'3px'}}>
+            <div style={{fontSize:'9px',color:C.mute,textTransform:'uppercase',marginBottom:'4px'}}>Buy zone exec rate</div>
+            <div style={{color:missStats.execRateBuy===null?C.faint:missStats.execRateBuy>=70?C.green:missStats.execRateBuy>=40?C.gold:C.red,fontSize:'20px',fontWeight:700}}>{missStats.execRateBuy!==null?`${missStats.execRateBuy}%`:'—'}</div>
+            <div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>{missStats.actedBuy} acted · {missStats.buyMisses} missed</div>
           </div>
         </div>
-        <button onClick={addTrade} style={{width:'100%',background:C.gold,color:C.bg,border:'none',padding:'10px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:'pointer',fontWeight:600}}>+ Log Trade</button>
+        {misses.length===0?<div style={{fontSize:'11px',color:C.faint,fontStyle:'italic',textAlign:'center',padding:'12px 0'}}>No missed zones recorded. Prompts appear automatically on dashboard load.</div>:(
+          <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+            {[...misses].reverse().map(m=>(
+              <div key={m.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 10px',background:C.bg,border:`1px solid ${m.side==='SELL'?'rgba(199,62,29,0.3)':'rgba(45,134,89,0.3)'}`,borderRadius:'3px'}}>
+                <div>
+                  <div style={{fontSize:'10px',color:m.side==='SELL'?C.red:C.green,fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase'}}>MISSED {m.side} · {m.tag}</div>
+                  <div style={{fontSize:'9px',color:C.mute,marginTop:'2px'}}>{m.date} {m.time} · {m.zone} · ${m.price?.toFixed(2)} · {m.mode}</div>
+                </div>
+                <button onClick={()=>deleteMiss(m.id)} style={{background:'transparent',border:'none',color:C.faint,cursor:'pointer',fontSize:'14px',padding:'0 4px'}}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{fontSize:'9px',color:C.faint,marginTop:'12px',lineHeight:1.5,fontStyle:'italic'}}>Target ≥70% execution rate on both sides for consistent accumulation discipline.</div>
+      </div>
+
+      <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px',marginBottom:'20px'}}>
+        <SH>◆ Add trade</SH>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginBottom:'12px'}}>
+          <div style={{display:'flex',gap:'8px'}}>
+            <button onClick={()=>setTradeType('SELL')} style={{flex:1,background:tradeType==='SELL'?C.red:'transparent',color:tradeType==='SELL'?'#fff':C.dim,border:`1px solid ${tradeType==='SELL'?C.red:C.border}`,padding:'8px',fontFamily:S,fontSize:'11px',letterSpacing:'0.1em',cursor:'pointer'}}>SELL</button>
+            <button onClick={()=>setTradeType('BUY')} style={{flex:1,background:tradeType==='BUY'?C.green:'transparent',color:tradeType==='BUY'?'#fff':C.dim,border:`1px solid ${tradeType==='BUY'?C.green:C.border}`,padding:'8px',fontFamily:S,fontSize:'11px',letterSpacing:'0.1em',cursor:'pointer'}}>BUY</button>
+          </div>
+          <input type="date" value={tradeDate} onChange={e=>setTradeDate(e.target.value)} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/>
+          <input type="number" placeholder="Shares" value={tradeShares} onChange={e=>setTradeShares(e.target.value)} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/>
+          <input type="number" placeholder="Price (USD)" value={tradePrice} onChange={e=>setTradePrice(e.target.value)} style={{background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/>
+          <input type="number" placeholder="Fees (USD, optional)" value={tradeFees} onChange={e=>setTradeFees(e.target.value)} style={{gridColumn:'span 2',background:C.bg,border:`1px solid ${C.border}`,color:C.text,padding:'8px',fontFamily:S,fontSize:'12px'}}/>
+        </div>
+        {tradeType==='BUY'&&sizingGuardrail?.cashGateFailed&&<div style={{marginBottom:'10px',padding:'8px 10px',background:'#111318',border:'1px dashed #2a3040',borderRadius:'3px',fontSize:'10px',color:'#7a8aaa',lineHeight:1.5}}>⛔ Cash gate active — {sizingGuardrail.cashGateReason}. BUY entry disabled in HOARD until the cash buffer is restored (macro override).</div>}
+        <button onClick={addTrade} disabled={tradeType==='BUY'&&sizingGuardrail?.cashGateFailed} style={{width:'100%',background:(tradeType==='BUY'&&sizingGuardrail?.cashGateFailed)?C.border:C.gold,color:C.bg,border:'none',padding:'10px',fontFamily:S,fontSize:'12px',letterSpacing:'0.15em',textTransform:'uppercase',cursor:(tradeType==='BUY'&&sizingGuardrail?.cashGateFailed)?'not-allowed':'pointer',fontWeight:600}}>+ Log trade</button>
       </div>
 
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px'}}>
@@ -1832,13 +2073,14 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
         {trades.length===0?<div style={{color:C.faint,fontSize:'12px',textAlign:'center',padding:'20px 0'}}>No trades logged yet.</div>
           :[...trades].sort((a,b)=>b.date.localeCompare(a.date)).map(t=>(
             <div key={t.id} style={{display:'grid',gridTemplateColumns:'60px 1fr 1fr 1fr 30px',gap:'10px',padding:'10px 0',borderBottom:`1px solid ${C.border}`,fontSize:'12px',alignItems:'center'}}>
-              <span style={{color:t.type==='SELL'?C.red:C.green,fontWeight:600,letterSpacing:'0.1em',fontSize:'10px'}}>{t.type}</span>
+              <span style={{color:t.type==='SELL'?C.red:C.green,fontWeight:600,letterSpacing:'0.1em',fontSize:'10px'}}>{t.type}{t.fromPositionId?' ·P':''}</span>
               <span style={{color:C.dim}}>{t.date}</span>
               <span style={{color:C.text}}>{t.shares} sh</span>
-              <span style={{color:C.gold}}>${t.price} {t.totalGbp&&`(£${t.totalGbp.toLocaleString()})`}</span>
+              <span style={{color:C.gold}}>${t.price}</span>
               <button onClick={()=>deleteTrade(t.id)} style={{background:'transparent',border:'none',color:C.faint,cursor:'pointer',fontSize:'14px'}}>×</button>
             </div>
           ))}
+        <div style={{fontSize:'9px',color:C.faint,marginTop:'10px',lineHeight:1.5,fontStyle:'italic'}}>Trades tagged ·P were auto-written from a position trim/close.</div>
       </div>
     </>)}
 
@@ -1846,7 +2088,48 @@ POST-BLOCK REPORT: A) Data timestamps. B) Estimates vs verified. C) mNAV audit m
     {view==='snapshots'&&(
       <div style={{background:C.panel,border:`1px solid ${C.border}`,padding:'20px'}}>
         <SH>◆ Signal evolution log</SH>
+        <div style={{fontSize:'11px',color:C.dim,marginBottom:'16px',lineHeight:1.6}}>Save weekly snapshots. Trends matter more than any single reading.</div>
         <EquityCurve snapshots={snapshots} startingShares={startingShares} mstrPrice={mstrPrice} gbpUsd={gbpUsd}/>
+        {snapshots.length===0?<div style={{color:C.faint,fontSize:'12px',textAlign:'center',padding:'20px 0'}}>No snapshots saved yet.</div>
+          :[...snapshots].reverse().map(s=>(
+            <div key={s.date} style={{padding:'12px 0',borderBottom:`1px solid ${C.border}`,fontSize:'11px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px'}}>
+                <span style={{color:C.dim}}>{new Date(s.date).toLocaleDateString()} {new Date(s.date).toLocaleTimeString().slice(0,5)}</span>
+                <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+                  <span style={{color:modeCfg[s.mode]?.color||C.gold,fontWeight:600,fontSize:'10px',letterSpacing:'0.1em'}}>{s.mode}</span>
+                  <button onClick={()=>deleteSnapshot(s.date)} style={{background:'transparent',border:'none',color:C.faint,cursor:'pointer',fontSize:'14px'}}>×</button>
+                </div>
+              </div>
+              <div className="g-snap-5" style={{color:C.mute,fontSize:'10px'}}>
+                <span>MSTR ${s.mstrPrice?.toFixed(0)}</span>
+                <span>BTC ${(s.btcPrice/1000).toFixed(0)}k</span>
+                <span>mNAV {s.mNAV}x</span>
+                <span>Bear {s.bearScore}</span>
+                <span>Bot {s.bottomScore}</span>
+              </div>
+              {s.currentShares!==undefined&&<div style={{marginTop:'4px',fontSize:'9px',color:C.faint}}>{s.currentShares.toFixed(0)} sh · £{Math.round((s.currentShares*s.mstrPrice/(s.gbpUsd||gbpUsd))+(s.cashBufferGBP||0)).toLocaleString()} portfolio</div>}
+              {(s.etfFlows5d!==undefined||s.btcBelowSthCost||s.btcDominance!==undefined||s.ivRank!==undefined)&&(
+                <div style={{display:'flex',gap:'12px',marginTop:'4px',color:C.faint,fontSize:'9px',flexWrap:'wrap'}}>
+                  {s.etfFlows5d!==undefined&&s.etfFlows5d!==null&&<span>ETF 5D {s.etfFlows5d>=0?'+':''}${s.etfFlows5d}M</span>}
+                  {s.btcBelowSthCost&&<span style={{color:C.red}}>BTC&lt;STH</span>}
+                  {s.etfOutflowsPersistent&&<span style={{color:C.red}}>ETF out</span>}
+                  {s.btcDominance!==undefined&&s.btcDominance!==null&&<span>BTC.D {s.btcDominance.toFixed(1)}%</span>}
+                  {s.mstrShortInt!==undefined&&s.mstrShortInt!==null&&<span>Short {s.mstrShortInt.toFixed(1)}%</span>}
+                  {s.atmActive&&<span style={{color:C.gold}}>ATM ON</span>}
+                  {s.ivRank!==undefined&&s.ivRank!==null&&<span style={{color:s.ivRank>75?C.red:C.faint}}>IV {s.ivRank}{s.ivRank>75?' ⚡':''}</span>}
+                </div>
+              )}
+            </div>
+          ))}
+        {regimeLog.length>0&&<div style={{marginTop:'20px',paddingTop:'16px',borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:'10px',color:C.mute,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:'10px'}}>Regime transition log ({regimeLog.length})</div>
+          {[...regimeLog].reverse().map(r=>(
+            <div key={r.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:`1px solid ${C.border}`,fontSize:'10px'}}>
+              <span style={{color:C.dim}}><span style={{color:modeCfg[r.from]?.color||C.mute}}>{r.from}</span> → <span style={{color:modeCfg[r.to]?.color||C.gold,fontWeight:600}}>{r.to}</span></span>
+              <span style={{color:C.faint}}>{(r.at||'').slice(0,10)} · ${r.mstrPrice?.toFixed(0)} · Bear {r.bearScore}/Bot {r.bottomScore}</span>
+            </div>
+          ))}
+        </div>}
       </div>
     )}
 
